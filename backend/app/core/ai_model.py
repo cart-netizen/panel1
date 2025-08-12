@@ -1103,9 +1103,15 @@ class ModelManager:
         RFModel: Экземпляр модели для данной лотереи
     """
     with self._lock:
-      if lottery_type not in self._rf_models:
-        print(f"Model Manager: Создание RF модели для {lottery_type}")
-        self._rf_models[lottery_type] = RFModel(lottery_config)
+      # Проверяем есть ли уже модель
+      if lottery_type in self._rf_models:
+        existing_model = self._rf_models[lottery_type]
+        print(f"Model Manager: RF модель для {lottery_type} уже существует (обучена: {existing_model.is_trained})")
+        return existing_model
+
+      # Создаем только если модели нет
+      print(f"Model Manager: Создание НОВОЙ RF модели для {lottery_type}")
+      self._rf_models[lottery_type] = RFModel(lottery_config)
       return self._rf_models[lottery_type]
 
   def get_lstm_model(self, lottery_type: str, lottery_config: dict) -> LotteryLSTMOps:
@@ -1114,10 +1120,17 @@ class ModelManager:
     Создает новую, если не существует.
     """
     with self._lock:
-      if lottery_type not in self._lstm_models:
-        print(f"Model Manager: Создание LSTM модели для {lottery_type}")
-        self._lstm_models[lottery_type] = LotteryLSTMOps(lottery_config)
+      # Проверяем есть ли уже модель
+      if lottery_type in self._lstm_models:
+        existing_model = self._lstm_models[lottery_type]
+        print(f"Model Manager: LSTM модель для {lottery_type} уже существует (обучена: {existing_model.is_trained})")
+        return existing_model
+
+      # Создаем только если модели нет
+      print(f"Model Manager: Создание НОВОЙ LSTM модели для {lottery_type}")
+      self._lstm_models[lottery_type] = LotteryLSTMOps(lottery_config)
       return self._lstm_models[lottery_type]
+
 
   def train_all_models(self, lottery_configs: dict, data_fetcher_func):
     """
@@ -1202,12 +1215,24 @@ class GlobalModelProxy:
     """Получает кэшированную модель для текущей лотереи"""
     from backend.app.core import data_manager
 
+    current_lottery = data_manager.CURRENT_LOTTERY
+    print(f"🔍 _get_cached_model: текущая лотерея = {current_lottery}")
+    print(f"🔍 _get_cached_model: кэшированная лотерея = {self._cached_lottery}")
+    print(f"🔍 _get_cached_model: модель в кэше = {self._cached_model is not None}")
+
     # Если модель для другой лотереи или не создана - обновляем
-    if self._cached_lottery != data_manager.CURRENT_LOTTERY or self._cached_model is None:
-      print(f"🔄 Кэширование RF модели для {data_manager.CURRENT_LOTTERY}")
+    if self._cached_lottery != current_lottery or self._cached_model is None:
+      print(f"🔄 Получение RF модели для {current_lottery}")
       config = data_manager.get_current_config()
-      self._cached_model = GLOBAL_MODEL_MANAGER.get_rf_model(data_manager.CURRENT_LOTTERY, config)
-      self._cached_lottery = data_manager.CURRENT_LOTTERY
+
+      # ВАЖНО: Получаем уже обученную модель
+      model = GLOBAL_MODEL_MANAGER.get_rf_model(current_lottery, config)
+      print(f"🔍 Полученная модель обучена: {model.is_trained if model else 'None'}")
+
+      self._cached_model = model
+      self._cached_lottery = current_lottery
+    else:
+      print(f"✅ Используем кэшированную модель для {current_lottery}")
 
     return self._cached_model
 
@@ -1234,22 +1259,22 @@ class GlobalModelProxy:
     # Сначала проверяем кэш
     cached_score = GLOBAL_RF_CACHE.get_score(f1, f2)
     if cached_score is not None:
-      return cached_score
+        return cached_score
 
     # Если не в кэше - вычисляем
     model = self._get_cached_model()
-    if model:
-      # ИСПРАВЛЕНИЕ: Принудительно обучаем модель если она не обучена
-      if not model.is_trained and not df_history.empty:
-        print(f"🎓 Принудительное обучение RF модели...")
-        model.train(df_history)
+    if not model or not model.is_trained:
+        print(f"❌ score_combination: Модель не готова (model={model}, trained={model.is_trained if model else 'None'})")
+        return -float('inf')
 
-      score = model.score_combination(f1, f2, df_history)
-      # Сохраняем в кэш
-      GLOBAL_RF_CACHE.set_score(f1, f2, score)
-      return score
-
-    return -float('inf')
+    try:
+        score = model.score_combination(f1, f2, df_history)
+        # ИСПРАВЛЕНИЕ: Правильное название метода
+        GLOBAL_RF_CACHE.set_score(f1, f2, score)
+        return score
+    except Exception as e:
+        print(f"❌ Ошибка оценки комбинации: {e}")
+        return -float('inf')
 
 
 GLOBAL_RF_MODEL = GlobalModelProxy()

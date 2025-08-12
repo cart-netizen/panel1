@@ -274,34 +274,25 @@ def generate_combinations(params: GenerationParams, context: None = Depends(set_
   rf_pred = None
   if time.time() - start_time < 0.8:  # Еще меньше времени для прогноза
     try:
-      # Используем ТУ ЖЕ модель, что и для генерации
+      # ИСПРАВЛЕНИЕ: Используем правильную проверку модели
       if ai_model.GLOBAL_RF_MODEL.is_trained:
-        from backend.app.core.data_cache import GLOBAL_DATA_CACHE
-        from backend.app.core import data_manager
-
-        cached_df = GLOBAL_DATA_CACHE.get_cached_history(data_manager.CURRENT_LOTTERY)
-
-        if not cached_df.empty:
-          last_draw = cached_df.iloc[0]
-          f1_pred, f2_pred = ai_model.GLOBAL_RF_MODEL.predict_next_combination(
-            last_draw['Числа_Поле1_list'],
-            last_draw['Числа_Поле2_list'],
-            cached_df
-          )
-          if f1_pred and f2_pred:
-            rf_pred = Combination(field1=f1_pred, field2=f2_pred, description="⚡ RF Sonic Prediction")
-            print(f"✅ RF прогноз за {time.time() - start_time:.1f}с")
-          else:
-            print(f"❌ RF прогноз вернул пустые результаты")
+        last_draw = df_history.iloc[0]
+        f1_pred, f2_pred = ai_model.GLOBAL_RF_MODEL.predict_next_combination(
+          last_draw['Числа_Поле1_list'],
+          last_draw['Числа_Поле2_list'],
+          df_history  # ВАЖНО: передаем df_history, а не cached_df
+        )
+        if f1_pred and f2_pred:
+          rf_pred = Combination(field1=f1_pred, field2=f2_pred, description="⚡ RF Sonic Prediction")
+          print(f"✅ RF прогноз за {time.time() - start_time:.1f}с")
         else:
-          print(f"❌ Кэшированные данные пусты")
+          print(f"❌ RF прогноз вернул пустые результаты")
       else:
         print(f"❌ RF модель не обучена для прогноза")
     except Exception as e:
       print(f"❌ RF prediction error: {e}")
       import traceback
       traceback.print_exc()
-
   else:
     print(f"⏰ Пропуск RF прогноза - недостаточно времени")
 
@@ -318,7 +309,7 @@ def generate_combinations(params: GenerationParams, context: None = Depends(set_
       # ОРИГИНАЛЬНАЯ ЛОГИКА: Получение LSTM модели
       from backend.app.core.ai_model import GLOBAL_MODEL_MANAGER
       config = data_manager.get_current_config()
-      lstm_model = GLOBAL_MODEL_MANAGER.get_lstm_model(data_manager.CURRENT_LOTTERY, config)
+      lstm_model = ai_model.GLOBAL_MODEL_MANAGER.get_lstm_model(data_manager.CURRENT_LOTTERY, config)
 
       if lstm_model and lstm_model.is_trained and not df_history.empty:
         print(f"LSTM Predict: Начало генерации прогноза для {data_manager.CURRENT_LOTTERY}")
@@ -554,6 +545,43 @@ async def evaluate_combination_trends(
     raise HTTPException(status_code=500, detail="Ошибка оценки комбинации")
 
 
+@router.get("/model-status", summary="📊 Статус AI моделей")
+def get_model_status(context: None = Depends(set_lottery_context)):
+  """Возвращает статус обучения AI моделей для текущей лотереи"""
+  try:
+    from backend.app.core.ai_model import GLOBAL_MODEL_MANAGER
+    from backend.app.core import data_manager
+
+    current_lottery = data_manager.CURRENT_LOTTERY
+    config = data_manager.get_current_config()
+
+    # Получаем модели
+    rf_model = GLOBAL_MODEL_MANAGER.get_rf_model(current_lottery, config)
+    lstm_model = GLOBAL_MODEL_MANAGER.get_lstm_model(current_lottery, config)
+
+    # Статус данных
+    df = data_manager.fetch_draws_from_db()
+    data_count = len(df)
+    limits = data_manager.get_lottery_limits()
+
+    return {
+      "lottery_type": current_lottery,
+      "data_status": {
+        "draws_count": data_count,
+        "min_required": limits['min_for_training'],
+        "has_enough_data": data_count >= limits['min_for_training']
+      },
+      "models_status": {
+        "rf_trained": rf_model.is_trained if rf_model else False,
+        "lstm_trained": lstm_model.is_trained if lstm_model else False
+      },
+      "last_draws_sample": df.head(3).to_dict('records') if not df.empty else []
+    }
+
+  except Exception as e:
+    raise HTTPException(status_code=500, detail=f"Ошибка получения статуса: {str(e)}")
+
+
 def _get_combination_recommendation(metrics: 'CombinationMetrics') -> str:
   """Генерирует рекомендацию на основе метрик"""
   if metrics.expected_performance >= 0.8:
@@ -649,18 +677,18 @@ def generate_combinations_turbo(
   # RF прогноз только если модель УЖЕ обучена и время < 3 сек
   if time.time() - start_time < 3:
     try:
-      rf_model = ai_model.GLOBAL_RF_MODEL
-      if rf_model.is_trained:
+      # ИСПРАВЛЕНИЕ: Используем правильную проверку
+      if ai_model.GLOBAL_RF_MODEL.is_trained:
         last_draw = df_history.iloc[0]
-        f1_pred, f2_pred = rf_model.predict_next_combination(
+        f1_pred, f2_pred = ai_model.GLOBAL_RF_MODEL.predict_next_combination(
           last_draw['Числа_Поле1_list'],
           last_draw['Числа_Поле2_list'],
           df_history
         )
         if f1_pred and f2_pred:
           rf_pred = Combination(field1=f1_pred, field2=f2_pred, description="⚡ RF Turbo")
-    except:
-      pass  # Игнорируем ошибки в турбо режиме
+    except Exception as e:
+      print(f"❌ Турбо RF ошибка: {e}")
 
   # Очистка памяти
   MEMORY_OPTIMIZER.cleanup_memory()
