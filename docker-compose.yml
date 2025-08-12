@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  # Основное приложение
+  lottery-api:
+    build: .
+    ports:
+      - "8000-8003:8000"  # 4 инстанса
+    depends_on:
+      - postgres
+      - redis
+      - rabbitmq
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:password@postgres:5432/lottery_analytics
+      - REDIS_URL=redis://redis:6379
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+    deploy:
+      replicas: 4  # 4 инстанса API
+      
+  # База данных с репликацией
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: lottery_analytics
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+      
+  # Redis для кэширования и сессий
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      
+  # RabbitMQ для очередей задач
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"  # Management UI
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+      
+  # Celery workers для фонового обучения
+  celery-worker:
+    build: .
+    command: celery -A backend.app.celery_app worker --loglevel=info
+    depends_on:
+      - postgres
+      - redis
+      - rabbitmq
+    deploy:
+      replicas: 6  # 6 воркеров для ML задач
+      
+  # Nginx балансировщик
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+    depends_on:
+      - lottery-api
+
+volumes:
+  postgres_data:
+  redis_data:
+  rabbitmq_data:
