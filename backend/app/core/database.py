@@ -19,9 +19,9 @@ DATABASE_URL = os.getenv(
 # Fallback на SQLite для разработки
 if not DATABASE_URL.startswith("postgresql"):
   DATABASE_URL = "sqlite:///./data/lottery_unified.db"
-  print("⚠️ Используется SQLite (режим разработки)")
+  print("Используется SQLite (режим разработки)")
 else:
-  print(f"🐘 Подключение к PostgreSQL: {DATABASE_URL.split('@')[1] if '@' in DATABASE_URL else 'localhost'}")
+  print(f"Подключение к PostgreSQL: {DATABASE_URL.split('@')[1] if '@' in DATABASE_URL else 'localhost'}")
 
 # Создание движка БД
 engine = create_engine(
@@ -146,6 +146,70 @@ class PaymentTransaction(Base):
   payment_method = Column(String(50), nullable=True)  # card, wallet, etc.
   created_at = Column(DateTime, nullable=False)
   completed_at = Column(DateTime, nullable=True)
+
+
+class UserActivity(Base):
+  """Активность пользователей для дашборда"""
+  __tablename__ = "user_activities"
+
+  id = Column(Integer, primary_key=True, index=True)
+  user_id = Column(Integer, nullable=True, index=True)  # null для анонимных
+  
+  # Тип активности
+  activity_type = Column(String(50), nullable=False, index=True)  # generation, analysis, clustering, verification
+  activity_description = Column(String(500), nullable=False)
+  
+  # Детали активности
+  lottery_type = Column(String(20), nullable=True)  # '4x20', '5x36plus'
+  details = Column(JSON, nullable=True)  # Дополнительные данные
+  
+  # Метаданные
+  created_at = Column(DateTime, nullable=False, index=True)
+  ip_address = Column(String(45), nullable=True)
+  user_agent = Column(String(500), nullable=True)
+
+
+class ModelStatistics(Base):
+  """Статистика работы ML моделей"""
+  __tablename__ = "model_statistics"
+
+  id = Column(Integer, primary_key=True, index=True)
+  lottery_type = Column(String(20), nullable=False, index=True)
+  model_type = Column(String(20), nullable=False, index=True)  # rf, lstm
+  
+  # Метрики точности
+  accuracy_percentage = Column(Float, nullable=True)
+  best_score = Column(Float, nullable=True)
+  predictions_count = Column(Integer, default=0)
+  correct_predictions = Column(Integer, default=0)
+  
+  # Статистика по периодам
+  date_period = Column(String(20), nullable=False, index=True)  # daily, weekly, monthly
+  period_start = Column(DateTime, nullable=False, index=True)
+  period_end = Column(DateTime, nullable=False)
+  
+  # Детальная статистика
+  statistics_data = Column(JSON, nullable=True)  # Подробные метрики
+  
+  created_at = Column(DateTime, nullable=False)
+  updated_at = Column(DateTime, nullable=True)
+
+
+class DashboardCache(Base):
+  """Кэш для данных дашборда"""
+  __tablename__ = "dashboard_cache"
+
+  id = Column(Integer, primary_key=True, index=True)
+  cache_key = Column(String(255), nullable=False, unique=True, index=True)
+  cache_type = Column(String(50), nullable=False, index=True)  # stats, trends, activity
+  
+  # Данные
+  cached_data = Column(JSON, nullable=False)
+  
+  # TTL
+  expires_at = Column(DateTime, nullable=False, index=True)
+  created_at = Column(DateTime, nullable=False)
+  updated_at = Column(DateTime, nullable=True)
 
   # Дополнительные данные
   extra_data = Column(JSON, nullable=True)

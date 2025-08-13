@@ -8,7 +8,7 @@ from typing import Dict, Optional
 import logging
 from datetime import datetime
 
-from backend.app.core.ai_model import RFModel, LotteryLSTMOps, ModelManager
+from backend.app.core.ai_model import RFModel, LotteryLSTMOps, ModelManager, GLOBAL_MODEL_MANAGER
 from backend.app.core.data_manager import LOTTERY_CONFIGS
 
 logger = logging.getLogger(__name__)
@@ -23,8 +23,8 @@ class AsyncModelManager:
     self.max_workers = max_workers
     self.executor = ThreadPoolExecutor(max_workers=max_workers)
 
-    # Синхронный менеджер для хранения моделей
-    self.sync_manager = ModelManager()
+    # Используем глобальный менеджер для общих моделей
+    self.sync_manager = GLOBAL_MODEL_MANAGER
 
     # Состояние обучения
     self.training_status: Dict[str, Dict] = {}

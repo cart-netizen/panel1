@@ -166,7 +166,7 @@ def generate_ml_based_combinations(df_history, num_combinations=5):
   return results[:num_combinations]
 
 
-def generate_rf_ranked_combinations(df_history, num_to_generate, num_candidates_to_score=200):
+def generate_rf_ranked_combinations(df_history, num_to_generate, num_candidates_to_score=500):
   """
   Генерирует комбинации с использованием "умного" подхода + динамический анализ трендов:
   1. Анализирует текущие тренды и паттерны
@@ -248,7 +248,7 @@ def generate_rf_ranked_combinations(df_history, num_to_generate, num_candidates_
   print(f"⚡ Генерация {candidates_count} кандидатов для {num_to_generate} итоговых...")
 
   start_time = time.time()
-  max_time_seconds = 1.5  # Увеличиваем лимит для качественного анализа
+  max_time_seconds = 10.0  # Достаточно времени для оценки всех комбинаций
 
   try:
     from backend.app.core.parallel_rf import smart_combination_generator

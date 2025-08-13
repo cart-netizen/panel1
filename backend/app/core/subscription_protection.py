@@ -4,6 +4,7 @@
 from enum import Enum
 from fastapi import HTTPException, status, Depends
 from backend.app.core.auth import get_current_user
+from typing import Optional
 
 
 class SubscriptionLevel(Enum):
@@ -94,6 +95,28 @@ def check_subscription_access(required_level: SubscriptionLevel):
 
   return decorator
 
+
+async def get_current_user_optional():
+  """Получение текущего пользователя без обязательной авторизации"""
+  try:
+    from fastapi import Request, HTTPException
+    from fastapi.security import HTTPBearer
+    import jwt
+    from backend.app.core.database import SessionLocal, User
+    from backend.app.core.auth import JWT_SECRET, JWT_ALGORITHM
+    
+    # Это упрощенная версия - в реальном проекте нужна полная реализация
+    # Возвращаем None если пользователь не авторизован
+    return None
+  except:
+    return None
+
+def get_current_user_optional_sync():
+  """Синхронная версия для использования в Depends"""
+  try:
+    return None  # Временная реализация
+  except:
+    return None
 
 # Готовые зависимости для использования
 require_basic = check_subscription_access(SubscriptionLevel.BASIC)

@@ -4,6 +4,7 @@ from datetime import datetime
 
 import pandas as pd
 from fastapi import APIRouter, Depends, Path, HTTPException, Query
+from sqlalchemy.orm import Session
 from typing import List
 
 # Импорты из вашего проекта
@@ -13,24 +14,20 @@ from backend.app.core.lottery_context import LotteryContext
 from backend.app.core.subscription_protection import require_basic, SubscriptionLevel, check_subscription_access
 from backend.app.core.async_ai_model import ASYNC_MODEL_MANAGER
 from backend.app.core.async_data_manager import ASYNC_DATA_MANAGER
+from backend.app.core.database import get_db
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# Зависимость для установки контекста лотереи
-async def set_lottery_context(
-    lottery_type: str = Path(..., description="Тип лотереи: '4x20' или '5x36plus'")
-):
-    if lottery_type not in data_manager.LOTTERY_CONFIGS:
-        raise HTTPException(status_code=404, detail="Lottery type not found")
-    with LotteryContext(lottery_type):
-        yield
+# Импортируем функцию установки контекста из analysis.py
+from .analysis import set_lottery_context
 
 
 @router.post("/generate", response_model=GenerationResponse, summary="🔒 Генерация (асинхронная)")
 async def generate_combinations_async(
     params: GenerationParams,
-    context: None = Depends(set_lottery_context),
-    current_user=Depends(require_basic)
+    lottery_type: str = Path(..., description="Тип лотереи: '4x20' или '5x36plus'"),
+    current_user=Depends(require_basic),
+    db: Session = Depends(get_db)
 ):
   """
   🚀 АСИНХРОННАЯ генерация комбинаций - не блокирует сервер!
@@ -40,53 +37,69 @@ async def generate_combinations_async(
   - Неблокирующий доступ к моделям
   - Быстрый ответ даже при обучении
   """
+  if lottery_type not in data_manager.LOTTERY_CONFIGS:
+    raise HTTPException(status_code=404, detail="Lottery type not found")
+    
   try:
-    lottery_type = data_manager.CURRENT_LOTTERY
-    lottery_config = data_manager.get_current_config()
+    with LotteryContext(lottery_type):
+      lottery_config = data_manager.get_current_config()
 
-    # Асинхронно загружаем данные
-    df_history = await ASYNC_DATA_MANAGER.fetch_draws_async(lottery_type)
+      # Асинхронно загружаем данные
+      df_history = await ASYNC_DATA_MANAGER.fetch_draws_async(lottery_type)
 
-    if df_history.empty:
-      return GenerationResponse(combinations=[], rf_prediction=None, lstm_prediction=None)
+      if df_history.empty:
+        return GenerationResponse(combinations=[], rf_prediction=None, lstm_prediction=None)
 
-    # Генерируем комбинации в отдельном потоке
-    generated = await asyncio.get_event_loop().run_in_executor(
-      None,  # Используем default executor
-      _sync_generate_combinations,
-      df_history, params
-    )
+      # Генерируем комбинации в отдельном потоке
+      generated = await asyncio.get_event_loop().run_in_executor(
+        None,  # Используем default executor
+        _sync_generate_combinations,
+        df_history, params
+      )
 
-    combinations_response = [
-      Combination(field1=f1, field2=f2, description=desc)
-      for f1, f2, desc in generated
-    ]
+      combinations_response = [
+        Combination(field1=f1, field2=f2, description=desc)
+        for f1, f2, desc in generated
+      ]
 
-    # Асинхронный RF прогноз
-    rf_pred = None
-    try:
-      if not df_history.empty:
-        last_draw = df_history.iloc[0]
-        f1_pred, f2_pred = await ASYNC_MODEL_MANAGER.predict_combination(
-          lottery_type, lottery_config,
-          last_draw['Числа_Поле1_list'],
-          last_draw['Числа_Поле2_list'],
-          df_history
-        )
-
-        if f1_pred and f2_pred:
-          rf_pred = Combination(
-            field1=f1_pred, field2=f2_pred,
-            description="RF Async Prediction"
+      # Асинхронный RF прогноз
+      rf_pred = None
+      try:
+        if not df_history.empty:
+          last_draw = df_history.iloc[0]
+          f1_pred, f2_pred = await ASYNC_MODEL_MANAGER.predict_combination(
+            lottery_type, lottery_config,
+            last_draw['Числа_Поле1_list'],
+            last_draw['Числа_Поле2_list'],
+            df_history
           )
-    except Exception as e:
-      logger.warning(f"RF prediction error: {e}")
 
-    return GenerationResponse(
-      combinations=combinations_response,
-      rf_prediction=rf_pred,
-      lstm_prediction=None  # LSTM добавим позже
-    )
+          if f1_pred and f2_pred:
+            rf_pred = Combination(
+              field1=f1_pred, field2=f2_pred,
+              description="RF Async Prediction"
+            )
+      except Exception as e:
+        logger.warning(f"RF prediction error: {e}")
+
+      # Логируем активность генерации
+      try:
+        from backend.app.api.dashboard import log_generation_activity
+        log_generation_activity(
+          db, 
+          current_user.id, 
+          lottery_type, 
+          len(combinations_response),
+          params.generator_type
+        )
+      except Exception as log_error:
+        logger.warning(f"Failed to log generation activity: {log_error}")
+
+      return GenerationResponse(
+        combinations=combinations_response,
+        rf_prediction=rf_pred,
+        lstm_prediction=None  # LSTM добавим позже
+      )
 
   except Exception as e:
     logger.error(f"Async generation error: {e}")
@@ -640,8 +653,8 @@ def generate_combinations_turbo(
   # Турбо генерация только для RF
   try:
     if params.generator_type == 'rf_ranked':
-      # Минимальное количество кандидатов для турбо режима
-      turbo_candidates = min(30, params.num_combinations * 10)
+      # Увеличенное количество кандидатов для качественной оценки
+      turbo_candidates = min(200, params.num_combinations * 20)
       generated = combination_generator.generate_rf_ranked_combinations(
         df_history,
         params.num_combinations,

@@ -22,8 +22,8 @@ class AsyncAutoScheduler:
     self.is_running = False
     self.tasks: Dict[str, asyncio.Task] = {}
     self.update_intervals = {
-      '4x20': 300,  # 5 минут
-      '5x36plus': 900  # 15 минут
+      '4x20': 3600,  # 1 час (тиражи проводятся 1 раз в день)
+      '5x36plus': 3600  # 1 час (тиражи проводятся 1 раз в день)
     }
 
   async def start_async_scheduler(self):

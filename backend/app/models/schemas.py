@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import List, Optional, Literal, Dict, Any
+from datetime import datetime
 
 # --- Модели для генерации (без изменений) ---
 
@@ -115,5 +116,51 @@ class FullPatternAnalysis(BaseModel):
     correlations_field2: List[CorrelationPair]
     cycles_field1: List[CycleStat]
     cycles_field2: List[CycleStat]
+
+# --- Модели для дашборда ---
+
+class ActivityItem(BaseModel):
+    type: str
+    description: str
+    timestamp: str
+    lottery_type: Optional[str] = None
+
+class DashboardStats(BaseModel):
+    generations_today: int
+    trend_analyses: int
+    accuracy_percentage: float
+    best_score: Any  # float или string "N/A"
+    total_generations: int
+    recent_activities: List[ActivityItem]
+
+class TrendField(BaseModel):
+    hot_acceleration: List[int]
+    cold_reversal: List[int]
+
+class TrendsData(BaseModel):
+    field1: TrendField
+    field2: TrendField
+
+class TrendAnalysis(BaseModel):
+    lottery_type: str
+    trends: Optional[TrendsData]
+    analyzed_draws: int
+    timestamp: str
+    summary: str
+    recommendations: List[str]
+
+class ModelStatsUpdate(BaseModel):
+    lottery_type: str
+    model_type: Literal['rf', 'lstm']
+    accuracy: float
+    best_score: float
+    predictions_count: int = 0
+    correct_predictions: int = 0
+
+class ActivityLogRequest(BaseModel):
+    activity_type: str
+    description: str
+    lottery_type: Optional[str] = None
+    details: Optional[Dict[str, Any]] = None
 
 #--
