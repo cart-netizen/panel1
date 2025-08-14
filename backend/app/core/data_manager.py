@@ -134,16 +134,18 @@ def init_db():
     return False
 
 
-def scrape_stoloto_archive(num_draws_to_fetch=MAX_DRAWS_IN_DB):
+def scrape_stoloto_archive(num_draws_to_fetch=MAX_DRAWS_IN_DB, lottery_type=None):
   """
   Fetches recent lottery draws from the Stoloto mobile API.
   """
-  config = get_current_config()
+  if lottery_type is None:
+    lottery_type = CURRENT_LOTTERY
+  config = LOTTERY_CONFIGS.get(lottery_type, get_current_config())
   api_url_template = config['api_url']
   field1_size = config['field1_size']
   field2_size = config['field2_size']
 
-  print(f"Attempting to load {num_draws_to_fetch} most recent draws for {CURRENT_LOTTERY}...")
+  print(f"Attempting to load {num_draws_to_fetch} most recent draws for {lottery_type}...")
 
   all_fetched_draws_data = []
   remaining_to_fetch = num_draws_to_fetch
@@ -289,11 +291,14 @@ def scrape_stoloto_archive(num_draws_to_fetch=MAX_DRAWS_IN_DB):
   return pd.DataFrame(all_fetched_draws_data)
 
 
-def store_draws_to_db(df):
+def store_draws_to_db(df, lottery_type=None):
   """
   Сохраняет DataFrame тиражей в PostgreSQL.
   Обрабатывает дубликаты и соблюдает лимиты.
   """
+  if lottery_type is None:
+    lottery_type = CURRENT_LOTTERY
+
   if df.empty:
     print("PostgreSQL Store: Нет данных для сохранения")
     return
@@ -304,6 +309,35 @@ def store_draws_to_db(df):
 
   db = get_db_session()
   try:
+    # Проверяем и удаляем возможные дубликаты в таблице
+    from sqlalchemy import func
+    duplicates = db.query(
+      LotteryDraw.draw_number,
+      func.count(LotteryDraw.draw_number).label('count')
+    ).filter(
+      LotteryDraw.lottery_type == lottery_type
+    ).group_by(
+      LotteryDraw.draw_number
+    ).having(
+      func.count(LotteryDraw.draw_number) > 1
+    ).all()
+
+    if duplicates:
+      print(f"⚠️ Обнаружены дубликаты для {lottery_type}: {[d[0] for d in duplicates]}")
+      # Удаляем дубликаты, оставляя только последнюю запись
+      for dup_number, count in duplicates:
+        dup_records = db.query(LotteryDraw).filter(
+          LotteryDraw.lottery_type == lottery_type,
+          LotteryDraw.draw_number == dup_number
+        ).order_by(LotteryDraw.created_at.desc()).all()
+
+        # Удаляем все кроме первой (самой новой)
+        for record in dup_records[1:]:
+          db.delete(record)
+
+      db.commit()
+      print(f"✅ Дубликаты удалены для {lottery_type}")
+
     # Подготавливаем записи для вставки
     new_records = []
 
@@ -332,13 +366,13 @@ def store_draws_to_db(df):
 
         # Проверяем, есть ли уже такой тираж
         existing = db.query(LotteryDraw).filter(
-          LotteryDraw.lottery_type == CURRENT_LOTTERY,
+          LotteryDraw.lottery_type == lottery_type,
           LotteryDraw.draw_number == draw_number
         ).first()
 
         if not existing:
           record = LotteryDraw(
-            lottery_type=CURRENT_LOTTERY,
+            lottery_type=lottery_type,
             draw_number=draw_number,
             draw_date=draw_date,
             field1_numbers=field1_numbers,
@@ -356,20 +390,20 @@ def store_draws_to_db(df):
     if new_records:
       db.add_all(new_records)
       db.commit()
-      print(f"PostgreSQL Store: Добавлено {len(new_records)} новых тиражей для {CURRENT_LOTTERY}")
+      print(f"PostgreSQL Store: Добавлено {len(new_records)} новых тиражей для {lottery_type}")
     else:
-      print(f"PostgreSQL Store: Все тиражи уже существуют в БД")
+      print(f"PostgreSQL Store: Все тиражи уже существуют в БД для {lottery_type}")
 
     # Применяем лимит записей
     total_count = db.query(LotteryDraw).filter(
-      LotteryDraw.lottery_type == CURRENT_LOTTERY
+      LotteryDraw.lottery_type == lottery_type
     ).count()
 
     if total_count > max_draws:
       # Удаляем самые старые тиражи
       excess = total_count - max_draws
       oldest_draws = db.query(LotteryDraw).filter(
-        LotteryDraw.lottery_type == CURRENT_LOTTERY
+        LotteryDraw.lottery_type == lottery_type
       ).order_by(LotteryDraw.draw_number.asc()).limit(excess).all()
 
       for draw in oldest_draws:
@@ -379,7 +413,7 @@ def store_draws_to_db(df):
       print(f"PostgreSQL Store: Удалено {excess} старых тиражей, лимит: {max_draws}")
 
     final_count = db.query(LotteryDraw).filter(
-      LotteryDraw.lottery_type == CURRENT_LOTTERY
+      LotteryDraw.lottery_type == lottery_type
     ).count()
     print(f"PostgreSQL Store: Итого тиражей в БД: {final_count}")
 
@@ -686,58 +720,22 @@ def fetch_draws_from_db(date_start=None, date_end=None, draw_start=None, draw_en
     db.close()
 
 
-# def update_database_from_source(is_initial_setup=False):
-#   """
-#   Main function to update the database from source API.
-#   """
-#   print(f"Starting database update from source for {CURRENT_LOTTERY}... (Initial Setup: {is_initial_setup})")
-#   init_db()
-#
-#   # Fetch the most recent N draws
-#   df_new_draws = scrape_stoloto_archive(num_draws_to_fetch=MAX_DRAWS_IN_DB)
-#
-#   if not df_new_draws.empty:
-#     store_draws_to_db(df_new_draws)
-#     print(f"Database update complete. Processed {len(df_new_draws)} draws from source.")
-#   else:
-#     print("No new data fetched from source. Database not updated.")
-#     if is_initial_setup and fetch_draws_from_db().empty:
-#       print("Initial setup and API fetch failed. Attempting to populate with sample data...")
-#       from backend.app.core import generate_sample_draws
-#       config = get_current_config()
-#       sample_df = generate_sample_draws(MAX_DRAWS_IN_DB // 2,
-#                                         field1_size=config['field1_size'],
-#                                         field2_size=config['field2_size'],
-#                                         field1_max=config['field1_max'],
-#                                         field2_max=config['field2_max'])
-#       if not sample_df.empty:
-#         store_draws_to_db(sample_df)
-#         print(f"Populated DB with {len(sample_df)} sample draws.")
-#       else:
-#         print("Failed to generate sample data.")
+
 
 def update_database_from_source():
     """
     Основная функция для обновления базы данных.
     Она сама определяет, нужно ли делать полную загрузку или только догружать свежие тиражи.
     """
-    print(f"Запущено обновление для лотереи: {CURRENT_LOTTERY}...")
+
+    lottery_type = CURRENT_LOTTERY  # Сохраняем текущий тип для использования в функции
+    print(f"Запущено обновление для лотереи: {lottery_type}...")
     init_db()  # На всякий случай проверяем, что БД и таблица существуют
 
     # Проверяем, есть ли в базе хоть какие-то данные
     existing_draws_df = fetch_draws_from_db()
     is_initial_setup = existing_draws_df.empty
 
-    # # Получаем лимиты для текущей лотереи
-    # limits = get_lottery_limits()
-    #
-    # if is_initial_setup:
-    #   print(f"База данных пуста. Выполняется полная начальная загрузка для {CURRENT_LOTTERY}...")
-    #   num_to_fetch = limits['initial_fetch']
-    #   print(f"Целевое количество тиражей: {num_to_fetch}")
-    # else:
-    #   print(f"База данных уже содержит данные для {CURRENT_LOTTERY}. Проверяем наличие новых тиражей...")
-    #   num_to_fetch = limits['update_fetch']
 
     # Получаем лимиты для текущей лотереи
     limits = get_lottery_limits()
@@ -745,25 +743,25 @@ def update_database_from_source():
     target_count = limits['initial_fetch']
 
     if is_initial_setup:
-      print(f"База данных пуста. Выполняется полная начальная загрузка для {CURRENT_LOTTERY}...")
+      print(f"База данных пуста. Выполняется полная начальная загрузка для {lottery_type}...")
       num_to_fetch = target_count
       print(f"Целевое количество тиражей: {num_to_fetch}")
     elif current_count < target_count:
-      print(f"База данных содержит {current_count} тиражей для {CURRENT_LOTTERY}.")
+      print(f"База данных содержит {current_count} тиражей для {lottery_type}.")
       print(f"Целевое количество: {target_count}. Необходимо догрузить исторические данные...")
       num_to_fetch = target_count  # Загружаем полный объем для получения старых тиражей
       print(f"Загружаем {num_to_fetch} тиражей для получения недостающих исторических данных")
     else:
-      print(f"База данных уже содержит достаточно данных для {CURRENT_LOTTERY} ({current_count} тиражей).")
+      print(f"База данных уже содержит достаточно данных для {lottery_type} ({current_count} тиражей).")
       print("Проверяем наличие новых тиражей...")
       num_to_fetch = limits['update_fetch']
 
     # Загружаем данные из источника
-    df_new_draws = scrape_stoloto_archive(num_draws_to_fetch=num_to_fetch)
+    df_new_draws = scrape_stoloto_archive(num_draws_to_fetch=num_to_fetch, lottery_type=lottery_type)
 
     if not df_new_draws.empty:
       # Функция store_draws_to_db сама отфильтрует дубликаты и добавит только новые
-      store_draws_to_db(df_new_draws)
+      store_draws_to_db(df_new_draws, lottery_type=lottery_type)
     else:
       print("Не удалось загрузить новые данные из источника.")
 
@@ -1013,11 +1011,13 @@ def smart_historical_load_with_pagination(target_count=400):
     return current_df
 
 
-def load_single_page_with_headers(page_number, count=30):
+def load_single_page_with_headers(page_number, count=30, lottery_type=None):
   """
   Загружает одну страницу тиражей с правильными заголовками
   """
-  config = get_current_config()
+  if lottery_type is None:
+    lottery_type = CURRENT_LOTTERY
+  config = LOTTERY_CONFIGS.get(lottery_type, get_current_config())
   api_url = config['api_url'].format(limit=count, page_num=page_number)
 
   headers = {
@@ -1046,7 +1046,7 @@ def load_single_page_with_headers(page_number, count=30):
     # Конвертируем в наш формат
     page_draws = []
     for draw_item in json_data["draws"]:
-      converted = convert_api_draw_to_our_format(draw_item)
+      converted = convert_api_draw_to_our_format(draw_item, lottery_type)
       if converted:
         page_draws.append(converted)
 
@@ -1057,10 +1057,15 @@ def load_single_page_with_headers(page_number, count=30):
     return []
 
 
-def convert_api_draw_to_our_format(api_draw):
+def convert_api_draw_to_our_format(api_draw, lottery_type=None):
   """Конвертирует формат API в наш формат БД"""
+  if lottery_type is None:
+    lottery_type = CURRENT_LOTTERY
+
+  # Используем конфигурацию переданной лотереи, а не глобальную
+  config = LOTTERY_CONFIGS.get(lottery_type, get_current_config())
   try:
-    config = get_current_config()
+    # config = get_current_config()
     field1_size = config['field1_size']
     field2_size = config['field2_size']
 

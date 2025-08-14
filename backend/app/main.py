@@ -138,16 +138,21 @@ async def lifespan(app: FastAPI):
 
   # Загрузка свежих данных при запуске
   print(f"\n[DATA] Автоматическая загрузка свежих данных при запуске...")
+  last_update_times = {}
   try:
     from backend.app.core.async_data_manager import ASYNC_DATA_MANAGER
-    
+
     # Параллельно обновляем данные всех лотерей
     update_results = await ASYNC_DATA_MANAGER.parallel_update_all_lotteries()
-    
+
+    # Сохраняем время последнего обновления для каждой лотереи
+    from datetime import datetime
     for lottery_type, updated in update_results.items():
+      if updated:
+        last_update_times[lottery_type] = datetime.now()
       status = "обновлены" if updated else "актуальны"
       print(f"   [DATA] {lottery_type}: {status}")
-      
+
     print(f"[DATA] Автоматическое обновление завершено")
     
   except Exception as e:
@@ -157,6 +162,8 @@ async def lifespan(app: FastAPI):
   scheduler_task = None
   try:
     from backend.app.core.async_scheduler import GLOBAL_ASYNC_SCHEDULER
+    # Передаем время последних обновлений, чтобы планировщик не дублировал
+    GLOBAL_ASYNC_SCHEDULER.set_last_update_times(last_update_times)
     await GLOBAL_ASYNC_SCHEDULER.start_async_scheduler()
     print(f"\n[SCHEDULER] Асинхронный планировщик запущен")
   except ImportError as e:

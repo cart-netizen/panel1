@@ -21,10 +21,15 @@ class AsyncAutoScheduler:
   def __init__(self):
     self.is_running = False
     self.tasks: Dict[str, asyncio.Task] = {}
+    self.last_update_times: Dict[str, datetime] = {}
     self.update_intervals = {
-      '4x20': 3600,  # 1 час (тиражи проводятся 1 раз в день)
-      '5x36plus': 3600  # 1 час (тиражи проводятся 1 раз в день)
+      '4x20': 7200,  # 120 минут
+      '5x36plus': 900  # 15 минут
     }
+
+  def set_last_update_times(self, update_times: Dict[str, datetime]):
+    """Устанавливает время последних обновлений"""
+    self.last_update_times = update_times
 
   async def start_async_scheduler(self):
     """Запускает асинхронный планировщик"""
@@ -69,6 +74,15 @@ class AsyncAutoScheduler:
   async def _schedule_lottery_updates_async(self, lottery_type: str):
     """Асинхронное планирование обновлений для лотереи"""
     interval = self.update_intervals.get(lottery_type, 600)
+
+    # Проверяем, было ли недавнее обновление при запуске
+    if lottery_type in self.last_update_times:
+      time_since_update = (datetime.now() - self.last_update_times[lottery_type]).total_seconds()
+      if time_since_update < interval:
+        wait_time = interval - time_since_update
+        logger.info(
+          f"⏳ {lottery_type}: ждем {wait_time:.0f}с до первого обновления (последнее было {time_since_update:.0f}с назад)")
+        await asyncio.sleep(wait_time)
 
     while self.is_running:
       try:

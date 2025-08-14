@@ -2,6 +2,8 @@
 Асинхронный менеджер данных для масштабирования
 """
 import asyncio
+from typing import Dict
+
 import aiohttp
 import pandas as pd
 from datetime import datetime
@@ -39,10 +41,12 @@ class AsyncDataManager:
     self.max_workers = max_workers
     self.executor = ThreadPoolExecutor(max_workers=max_workers)
     self.update_locks: Dict[str, asyncio.Lock] = {}
+    self.update_in_progress: Dict[str, bool] = {}
 
     # Создаем локи для каждой лотереи
     for lottery_type in LOTTERY_CONFIGS.keys():
       self.update_locks[lottery_type] = asyncio.Lock()
+      self.update_in_progress[lottery_type] = False
 
   async def fetch_draws_async(self, lottery_type: str, limit: int = None) -> pd.DataFrame:
     """
@@ -73,7 +77,13 @@ class AsyncDataManager:
     """
     Фоновое обновление данных лотереи без блокировки API
     """
+    # Проверяем, не идет ли уже обновление
+    if self.update_in_progress.get(lottery_type, False):
+      logger.info(f"⏭️ {lottery_type}: обновление уже выполняется, пропускаем")
+      return False
+
     async with self.update_locks[lottery_type]:
+      self.update_in_progress[lottery_type] = True
       logger.info(f"🔄 Фоновое обновление данных для {lottery_type}")
 
       try:
@@ -83,12 +93,12 @@ class AsyncDataManager:
           self.executor, update_func
         )
 
+        return result
+      finally:
+        self.update_in_progress[lottery_type] = False
+
         logger.info(f"✅ Фоновое обновление {lottery_type} завершено: {result}")
         return result
-
-      except Exception as e:
-        logger.error(f"❌ Ошибка фонового обновления {lottery_type}: {e}")
-        return False
 
   def _sync_update_lottery(self, lottery_type: str) -> bool:
     """Синхронное обновление в потоке"""

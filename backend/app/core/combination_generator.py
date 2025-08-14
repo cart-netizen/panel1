@@ -773,3 +773,24 @@ def generate_multi_strategy_combinations(df_history, num_per_strategy=10):
 
   # Если RF не готов, возвращаем первые 20
   return unique_combinations[:20]
+
+def record_rf_performance(rf_score: float, combination_count: int, lottery_type: str):
+    """Записывает производительность RF модели"""
+    try:
+      from backend.app.core.database import get_db
+      from backend.app.api.dashboard import DashboardService
+
+      db = next(get_db())
+      dashboard_service = DashboardService(db)
+
+      dashboard_service.update_model_statistics(
+        lottery_type=lottery_type,
+        model_type='rf',
+        accuracy=75.0,  # Можно вычислять динамически
+        best_score=rf_score,
+        predictions_count=combination_count,
+        correct_predictions=0  # Обновится после проверки
+      )
+
+    except Exception as e:
+      print(f"Ошибка записи производительности RF: {e}")
