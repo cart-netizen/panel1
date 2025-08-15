@@ -9,6 +9,9 @@ from backend.app.api import generation, analysis, verification, strategies, patt
 
 from backend.app.core.data_manager import get_lottery_limits
 from backend.app.core.lottery_context import LotteryContext
+from backend.app.core.cache_manager import CACHE_MANAGER, logger
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
   """
@@ -166,6 +169,11 @@ async def lifespan(app: FastAPI):
     GLOBAL_ASYNC_SCHEDULER.set_last_update_times(last_update_times)
     await GLOBAL_ASYNC_SCHEDULER.start_async_scheduler()
     print(f"\n[SCHEDULER] Асинхронный планировщик запущен")
+
+    # Инициализация кэша последних тиражей
+    logger.info("📦 Инициализация кэша...")
+    CACHE_MANAGER.update_all_last_draws()
+
   except ImportError as e:
     print(f"[WARN] Модуль планировщика недоступен: {e}")
   except Exception as e:

@@ -14,6 +14,9 @@ from backend.app.core import data_manager
 from backend.app.core.lottery_context import LotteryContext
 from backend.app.models.schemas import DashboardStats, ActivityItem, TrendAnalysis
 from backend.app.core.subscription_protection import get_current_user_optional_sync as get_current_user_optional
+from backend.app.core.cache_manager import CACHE_MANAGER
+import logging
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -56,85 +59,62 @@ class DashboardService:
     def get_dashboard_stats(self, user_id: Optional[int] = None) -> DashboardStats:
         today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
 
-        # Активность за сегодня
-        generations_today = self.db.query(UserActivity).filter(
-            UserActivity.activity_type == 'generation',
-            UserActivity.created_at >= today_start,
-            (UserActivity.user_id == user_id if user_id else True)
-        ).count()
-
-        # ИСПРАВЛЕНО: Подсчет анализов трендов (включая автозапросы от frontend)
-        trend_analyses = self.db.query(UserActivity).filter(
-            UserActivity.activity_type.in_(['trends', 'analysis']),
-            UserActivity.created_at >= today_start,
-            (UserActivity.user_id == user_id if user_id else True)
-        ).count()
-
-        total_generations = self.db.query(UserActivity).filter(
-            UserActivity.activity_type == 'generation',
-            (UserActivity.user_id == user_id if user_id else True)
-        ).count()
-
-        # ИСПРАВЛЕНО: Точность прогнозов и её динамика
-        thirty_days_ago = today_start - timedelta(days=30)
-        one_week_ago = today_start - timedelta(days=7)
-        two_weeks_ago = today_start - timedelta(days=14)
-
-        # Средняя точность за последние 30 дней
         try:
-            current_accuracy_result = self.db.query(func.avg(ModelStatistics.accuracy_percentage)).filter(
-                ModelStatistics.period_start >= thirty_days_ago,
-                ModelStatistics.model_type == 'rf'  # Фокусируемся на RF модели
-            ).scalar()
-            current_accuracy_avg = float(current_accuracy_result) if current_accuracy_result else 0.0
-        except:
-            current_accuracy_avg = 0.0
+            # Активность за сегодня
+            generations_today_query = self.db.query(UserActivity).filter(
+                UserActivity.activity_type == 'generation',
+                UserActivity.created_at >= today_start
+            )
 
-        # Динамика: сравниваем последнюю неделю с предпоследней
-        try:
-            last_week_result = self.db.query(func.avg(ModelStatistics.accuracy_percentage)).filter(
-                ModelStatistics.period_start >= one_week_ago,
-                ModelStatistics.model_type == 'rf'
-            ).scalar()
-            last_week_avg = float(last_week_result) if last_week_result else 0.0
+            if user_id:
+                generations_today_query = generations_today_query.filter(
+                    UserActivity.user_id == user_id
+                )
 
-            previous_week_result = self.db.query(func.avg(ModelStatistics.accuracy_percentage)).filter(
-                ModelStatistics.period_start >= two_weeks_ago,
-                ModelStatistics.period_start < one_week_ago,
-                ModelStatistics.model_type == 'rf'
-            ).scalar()
-            previous_week_avg = float(previous_week_result) if previous_week_result else 0.0
+            generations_today = generations_today_query.count()
 
-            accuracy_change = last_week_avg - previous_week_avg if previous_week_avg > 0 else 0.0
-        except:
-            last_week_avg = 0.0
-            previous_week_avg = 0.0
-            accuracy_change = 0.0
+            # Остальная статистика...
+            trend_analyses = 0  # Заглушка
 
-        # ИСПРАВЛЕНО: Лучшая оценка RF
-        best_score_result = self.db.query(func.max(ModelStatistics.best_score)).filter(
-            ModelStatistics.model_type == 'rf'
-        ).scalar()
-        best_score = float(best_score_result) if best_score_result else None
+            # Недавняя активность
+            recent_activities_query = self.db.query(UserActivity)
+            if user_id:
+                recent_activities_query = recent_activities_query.filter(
+                    UserActivity.user_id == user_id
+                )
 
-        # Недавняя активность
-        recent_activities_db = self.db.query(UserActivity).filter(
-            (UserActivity.user_id == user_id if user_id else True)
-        ).order_by(desc(UserActivity.created_at)).limit(5).all()
+            recent_activities_db = recent_activities_query.order_by(
+                desc(UserActivity.created_at)
+            ).limit(5).all()
 
-        recent_activities = [ActivityItem.from_orm(act) for act in recent_activities_db]
+            recent_activities = []
+            for act in recent_activities_db:
+                recent_activities.append({
+                    'type': act.activity_type,
+                    'description': act.activity_description,
+                    'timestamp': act.created_at.isoformat(),
+                    'lottery_type': act.lottery_type
+                })
 
-        return DashboardStats(
-            generations_today=generations_today,
-            trend_analyses=trend_analyses,
-            accuracy_percentage=PredictionAccuracy(
-                value=round(current_accuracy_avg, 1),
-                change=round(accuracy_change, 1)
-            ),
-            best_score=round(best_score, 3) if best_score is not None else 'N/A',
-            total_generations=total_generations,
-            recent_activities=recent_activities
-        )
+            return {
+                'generations_today': generations_today,
+                'trend_analyses': trend_analyses,
+                'accuracy_percentage': {'value': 0, 'change': 0},
+                'best_score': 'N/A',
+                'total_generations': generations_today,  # Временно
+                'recent_activities': recent_activities
+            }
+
+        except Exception as e:
+            logger.error(f"Ошибка получения статистики: {e}")
+            return {
+                'generations_today': 0,
+                'trend_analyses': 0,
+                'accuracy_percentage': {'value': 0, 'change': 0},
+                'best_score': 'N/A',
+                'total_generations': 0,
+                'recent_activities': []
+            }
     
     def get_trends_analysis(self, lottery_type: str) -> Dict[str, Any]:
         """Получение анализа трендов для лотереи"""
@@ -320,97 +300,37 @@ async def get_latest_draw_detailed(
     lottery_type: str,
     db: Session = Depends(get_db)
 ):
-    """Получение подробной информации о последнем тираже"""
+    """Получение информации о последнем тираже из кэша"""
     if lottery_type not in data_manager.LOTTERY_CONFIGS:
         raise HTTPException(status_code=404, detail="Неизвестный тип лотереи")
 
     try:
-        # Сначала пробуем получить с правильным lottery_type
-        latest_draw = db.query(LotteryDraw).filter(
-            LotteryDraw.lottery_type == lottery_type
-        ).order_by(
-            LotteryDraw.draw_number.desc()
-        ).first()
+        # Получаем из кэша
+        cached_draw = CACHE_MANAGER.get_last_draw(lottery_type)
 
-        # Если не нашли, проверяем есть ли записи с пустым lottery_type
-        if not latest_draw:
-            # Проверяем есть ли вообще записи в БД
-            any_draw = db.query(LotteryDraw).first()
+        if cached_draw:
+            cached_draw['status'] = 'ok'
+            return cached_draw
 
-            if any_draw:
-                # Если есть записи, но lottery_type пустой или неправильный
-                # Автоматически исправляем для текущей лотереи
-                empty_count = db.query(LotteryDraw).filter(
-                    or_(
-                        LotteryDraw.lottery_type == None,
-                        LotteryDraw.lottery_type == '',
-                        LotteryDraw.lottery_type != '4x20',
-                        LotteryDraw.lottery_type != '5x36plus'
-                    )
-                ).count()
-
-                if empty_count > 0:
-                    # Исправляем на 4x20 (так как это основная лотерея)
-                    db.query(LotteryDraw).filter(
-                        or_(
-                            LotteryDraw.lottery_type == None,
-                            LotteryDraw.lottery_type == '',
-                            ~LotteryDraw.lottery_type.in_(['4x20', '5x36plus'])
-                        )
-                    ).update(
-                        {LotteryDraw.lottery_type: '4x20'},
-                        synchronize_session=False
-                    )
-                    db.commit()
-
-                    # Пробуем снова получить
-                    latest_draw = db.query(LotteryDraw).filter(
-                        LotteryDraw.lottery_type == lottery_type
-                    ).order_by(
-                        LotteryDraw.draw_number.desc()
-                    ).first()
-
-        if not latest_draw:
-            return {
-                "draw_number": 0,
-                "draw_date": datetime.utcnow().isoformat(),
-                "field1_numbers": [],
-                "field2_numbers": [],
-                "lottery_type": lottery_type,
-                "status": "no_data"
-            }
-
-        # Форматируем дату правильно
-        draw_date = latest_draw.draw_date
-        if isinstance(draw_date, datetime):
-            draw_date_str = draw_date.isoformat()
-        elif isinstance(draw_date, str):
-            draw_date_str = draw_date
-        else:
-            draw_date_str = str(draw_date)
-
-        return {
-            "draw_number": int(latest_draw.draw_number),
-            "draw_date": draw_date_str,
-            "field1_numbers": sorted(list(latest_draw.field1_numbers)) if latest_draw.field1_numbers else [],
-            "field2_numbers": sorted(list(latest_draw.field2_numbers)) if latest_draw.field2_numbers else [],
-            "lottery_type": lottery_type,
-            "status": "ok"
-        }
-
-    except Exception as e:
-        print(f"Ошибка получения последнего тиража для {lottery_type}: {e}")
-        import traceback
-        traceback.print_exc()
-
+        # Если кэш пуст, возвращаем пустой результат
         return {
             "draw_number": 0,
             "draw_date": datetime.utcnow().isoformat(),
             "field1_numbers": [],
             "field2_numbers": [],
             "lottery_type": lottery_type,
-            "status": "error",
-            "error_message": str(e)
+            "status": "no_data"
+        }
+
+    except Exception as e:
+        logger.error(f"Ошибка получения последнего тиража: {e}")
+        return {
+            "draw_number": 0,
+            "draw_date": datetime.utcnow().isoformat(),
+            "field1_numbers": [],
+            "field2_numbers": [],
+            "lottery_type": lottery_type,
+            "status": "error"
         }
 
 

@@ -65,6 +65,18 @@ async def generate_combinations_async(
         for f1, f2, desc in generated
       ]
 
+      try:
+        from backend.app.api.dashboard import log_generation_activity
+        log_generation_activity(
+          db=next(get_db()),  # Получаем сессию БД
+          user_id=current_user.id if current_user else None,
+          lottery_type=lottery_type,
+          combination_count=len(combinations_response),
+          method=params.method
+        )
+      except Exception as e:
+        logger.error(f"Ошибка логирования активности: {e}")
+
       # Асинхронный RF прогноз
       rf_pred = None
       try:
