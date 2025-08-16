@@ -313,6 +313,38 @@ class BankrollManager:
 
     return profitability
 
+  def calculate_kelly_bet(self, win_probability: float, odds: float, fraction: float = 0.25) -> float:
+    """
+    Расчёт ставки по критерию Келли
+
+    Args:
+        win_probability: Вероятность выигрыша (0-1)
+        odds: Коэффициент выплаты
+        fraction: Доля от полного Келли (обычно 0.25 для безопасности)
+
+    Returns:
+        Размер ставки
+    """
+    if win_probability <= 0 or win_probability >= 1:
+      return self.min_bet
+
+    # Формула Келли: f = (bp - q) / b
+    # где b = odds - 1, p = win_probability, q = 1 - p
+    b = odds - 1
+    p = win_probability
+    q = 1 - p
+
+    kelly_fraction = (b * p - q) / b if b > 0 else 0
+
+    # Применяем долю для безопасности
+    kelly_fraction = kelly_fraction * fraction
+
+    # Ограничиваем размер ставки
+    if kelly_fraction <= 0:
+      return self.min_bet
+
+    bet_size = self.current_bankroll * kelly_fraction
+    return max(self.min_bet, min(bet_size, self.max_bet))
 
 # Глобальный экземпляр менеджера банкролла
 GLOBAL_BANKROLL_MANAGER = BankrollManager()

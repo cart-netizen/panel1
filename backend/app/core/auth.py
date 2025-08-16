@@ -4,12 +4,15 @@
 from datetime import datetime, timedelta
 from typing import Optional
 import jwt
+from jose import JWTError
 from passlib.context import CryptContext
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from fastapi import HTTPException, status, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from backend.app.core.database import User, SessionLocal
+from backend.app.core.database import User, SessionLocal, get_db
+from fastapi.security import OAuth2PasswordBearer
 
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 # Конфигурация
 SECRET_KEY = "your-super-secret-key-change-in-production"
 ALGORITHM = "HS256"
@@ -156,27 +159,54 @@ def refresh_user_from_db(user_id: int):
 security = HTTPBearer()
 
 
-def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-  """Получает текущего пользователя из токена с обновлением из БД"""
-  token = credentials.credentials
-  payload = verify_token(token)
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+  """
+  Получает текущего пользователя из токена с загрузкой всех связанных данных
+  """
+  credentials_exception = HTTPException(
+    status_code=status.HTTP_401_UNAUTHORIZED,
+    detail="Could not validate credentials",
+    headers={"WWW-Authenticate": "Bearer"},
+  )
 
-  if payload is None:
-    raise HTTPException(
-      status_code=status.HTTP_401_UNAUTHORIZED,
-      detail="Недействительный токен",
-      headers={"WWW-Authenticate": "Bearer"},
-    )
+  try:
+    payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    email: str = payload.get("sub")
+    if email is None:
+      raise credentials_exception
+  except JWTError:
+    raise credentials_exception
 
-  # ИСПРАВЛЕНИЕ: Всегда получаем свежие данные из БД
-  user = refresh_user_from_db_by_email(payload["email"])
+  # Загружаем пользователя со всеми связями
+  user = db.query(User).options(
+    joinedload(User.preferences)  # Загружаем preferences сразу
+  ).filter(User.email == email).first()
+
   if user is None:
-    raise HTTPException(
-      status_code=status.HTTP_401_UNAUTHORIZED,
-      detail="Пользователь не найден"
-    )
+    raise credentials_exception
 
   return user
+# def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+#   """Получает текущего пользователя из токена с обновлением из БД"""
+#   token = credentials.credentials
+#   payload = verify_token(token)
+#
+#   if payload is None:
+#     raise HTTPException(
+#       status_code=status.HTTP_401_UNAUTHORIZED,
+#       detail="Недействительный токен",
+#       headers={"WWW-Authenticate": "Bearer"},
+#     )
+#
+#   # ИСПРАВЛЕНИЕ: Всегда получаем свежие данные из БД
+#   user = refresh_user_from_db_by_email(payload["email"])
+#   if user is None:
+#     raise HTTPException(
+#       status_code=status.HTTP_401_UNAUTHORIZED,
+#       detail="Пользователь не найден"
+#     )
+#
+#   return user
 
 def refresh_user_from_db_by_email(email: str):
   """Получает свежие данные пользователя по email"""

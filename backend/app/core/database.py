@@ -5,9 +5,11 @@
 """
 
 import os
-from sqlalchemy import create_engine, text
+from datetime import datetime
+
+from sqlalchemy import create_engine, text, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, relationship
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, Float, Text, JSON, MetaData
 
 # Конфигурация базы данных
@@ -94,20 +96,48 @@ class User(Base):
   is_verified = Column(Boolean, default=False)
 
   # Подписка
-  subscription_status = Column(String(50), default="inactive")  # inactive, active, canceled, expired
-  subscription_plan = Column(String(50), nullable=True)  # basic, premium, pro
+  subscription_status = Column(String(50), default="active")  # inactive, active, canceled, expired
+  subscription_plan = Column(String(50), default="basic")  # basic, premium, pro
   subscription_expires_at = Column(DateTime, nullable=True)
 
   # Платежи
   customer_id = Column(String(255), nullable=True)  # ID в платежной системе
 
   # Метаданные
-  created_at = Column(DateTime, nullable=False)
+  created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
   last_login_at = Column(DateTime, nullable=True)
 
-  # Настройки
-  preferences = Column(JSON, nullable=True)  # Пользовательские настройки
+  # Связь с preferences - используем lazy='joined' для автоматической загрузки
+  preferences = relationship("UserPreferences", back_populates="user", uselist=False, lazy='joined')
 
+class UserPreferences(Base):
+    """Предпочтения и настройки пользователя"""
+    __tablename__ = "user_preferences"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False)
+
+    # Избранные числа в формате JSON
+    favorite_numbers = Column(Text, default='{"field1": [], "field2": []}')
+
+    # Дефолтная лотерея
+    default_lottery = Column(String(50), default="4x20")
+
+    # Предпочитаемые стратегии генерации
+    preferred_strategies = Column(Text, default='[]')  # JSON массив
+
+    # Настройки уведомлений
+    notification_settings = Column(Text, default='{}')  # JSON объект
+
+    # История действий пользователя (для персонализации)
+    action_history = Column(Text, default='[]')  # JSON массив последних действий
+
+    # Временные метки
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Связь с пользователем
+    user = relationship("User", back_populates="preferences")
 
 class UserSession(Base):
   """Сессии пользователей для безопасности"""

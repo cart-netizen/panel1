@@ -10,7 +10,8 @@ from backend.app.api import generation, analysis, verification, strategies, patt
 from backend.app.core.data_manager import get_lottery_limits
 from backend.app.core.lottery_context import LotteryContext
 from backend.app.core.cache_manager import CACHE_MANAGER, logger
-
+from backend.app.api import user_preferences
+from backend.app.api import analysis_tools, simulation_tools
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -239,7 +240,23 @@ app.include_router(auth.router, prefix="/api/v1/auth", tags=["0. Authentication"
 app.include_router(subscriptions.router, prefix="/api/v1/subscriptions", tags=["💰 Subscriptions"])
 app.include_router(dashboard.router, prefix="/api/v1/dashboard", tags=["📊 Dashboard"])
 
+app.include_router(
+    user_preferences.router,
+    prefix="/api/v1/api/v1/user",
+    tags=["user"]
+)
 
+app.include_router(
+    analysis_tools.router,
+    prefix="/api/v1/analysis",
+    tags=["analysis"]
+)
+
+app.include_router(
+    simulation_tools.router,
+    prefix="/api/v1/simulation",
+    tags=["simulation"]
+)
 @app.get("/", summary="Корневой эндпоинт")
 def read_root():
   return {"message": "Welcome to the Lottery Analysis API. Visit /docs for documentation."}
