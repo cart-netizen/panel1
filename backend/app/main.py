@@ -4,6 +4,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
+from fastapi.openapi.utils import get_openapi
+
 from backend.app.core.async_ai_model import ASYNC_MODEL_MANAGER
 from backend.app.api import generation, analysis, verification, strategies, patterns, data_management, auth, subscriptions, dashboard
 
@@ -219,6 +221,36 @@ app = FastAPI(
   lifespan=lifespan
 )
 
+
+def custom_openapi():
+  if app.openapi_schema:
+    return app.openapi_schema
+
+  openapi_schema = get_openapi(
+    title=app.title,
+    version=app.version,
+    description=app.description,
+    routes=app.routes,
+  )
+
+  # Настройка схемы безопасности
+  openapi_schema["components"]["securitySchemes"] = {
+    "Bearer": {
+      "type": "http",
+      "scheme": "bearer",
+      "bearerFormat": "JWT",
+      "description": "Введите токен в формате: Bearer {ваш_токен}"
+    }
+  }
+  # Применяем security глобально к защищенным эндпоинтам
+  openapi_schema["security"] = [{"Bearer": []}]
+
+  app.openapi_schema = openapi_schema
+  return app.openapi_schema
+
+
+app.openapi = custom_openapi
+
 # Настройка CORS для разрешения запросов от фронтенда
 app.add_middleware(
   CORSMiddleware,
@@ -242,7 +274,7 @@ app.include_router(dashboard.router, prefix="/api/v1/dashboard", tags=["📊 Das
 
 app.include_router(
     user_preferences.router,
-    prefix="/api/v1/api/v1/user",
+    prefix="/api/v1/user",
     tags=["user"]
 )
 

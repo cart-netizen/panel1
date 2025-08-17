@@ -5,18 +5,19 @@ from datetime import datetime, timedelta
 from typing import Optional
 import jwt
 from jose import JWTError
+from jwt import ExpiredSignatureError
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session, joinedload
 from fastapi import HTTPException, status, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from backend.app.core.database import User, SessionLocal, get_db
-from fastapi.security import OAuth2PasswordBearer
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+# from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 # Конфигурация
 SECRET_KEY = "your-super-secret-key-change-in-production"
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24
 
 # Хеширование паролей
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -57,19 +58,39 @@ def verify_token(token: str) -> Optional[dict]:
     return None
 
 
-def authenticate_user(email: str, password: str) -> Optional[User]:
-  """Аутентифицирует пользователя"""
-  db = SessionLocal()
-  try:
-    user = db.query(User).filter(User.email == email).first()
-    if not user:
-      return None
-    if not verify_password(password, user.hashed_password):
-      return None
-    return user
-  finally:
-    db.close()
+# def authenticate_user(email: str, password: str) -> Optional[User]:
+#   """Аутентифицирует пользователя"""
+#   db = SessionLocal()
+#   try:
+#     user = db.query(User).filter(User.email == email).first()
+#     if not user:
+#       return None
+#     if not verify_password(password, user.hashed_password):
+#       return None
+#     return user
+#   finally:
+#     db.close()
+def authenticate_user(email_or_username: str, password: str):
+    """
+    Аутентификация пользователя.
+    Принимает email или username (для совместимости с OAuth2).
+    """
+    from backend.app.core.database import SessionLocal
 
+    db = SessionLocal()
+    try:
+      # Пытаемся найти по email
+      user = db.query(User).filter(User.email == email_or_username).first()
+
+      if not user:
+        return False
+
+      if not verify_password(password, user.hashed_password):
+        return False
+
+      return user
+    finally:
+      db.close()
 
 def create_user(email: str, password: str, full_name: str = None) -> User:
   """Создает нового пользователя"""
@@ -161,11 +182,17 @@ security = HTTPBearer()
 
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
   """
-  Получает текущего пользователя из токена с загрузкой всех связанных данных
+  Получает текущего пользователя из токена с улучшенной обработкой ошибок
   """
   credentials_exception = HTTPException(
     status_code=status.HTTP_401_UNAUTHORIZED,
     detail="Could not validate credentials",
+    headers={"WWW-Authenticate": "Bearer"},
+  )
+
+  token_expired_exception = HTTPException(
+    status_code=status.HTTP_401_UNAUTHORIZED,
+    detail="Token has expired. Please login again",
     headers={"WWW-Authenticate": "Bearer"},
   )
 
@@ -174,12 +201,15 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     email: str = payload.get("sub")
     if email is None:
       raise credentials_exception
+  except ExpiredSignatureError:
+    # Специальная обработка истекших токенов
+    raise token_expired_exception
   except JWTError:
     raise credentials_exception
 
   # Загружаем пользователя со всеми связями
   user = db.query(User).options(
-    joinedload(User.preferences)  # Загружаем preferences сразу
+    joinedload(User.preferences)
   ).filter(User.email == email).first()
 
   if user is None:

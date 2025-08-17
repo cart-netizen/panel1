@@ -118,7 +118,8 @@ class UserPreferences(Base):
     user_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False)
 
     # Избранные числа в формате JSON
-    favorite_numbers = Column(Text, default='{"field1": [], "field2": []}')
+    # favorite_numbers = Column(Text, default='{"field1": [], "field2": []}')
+    favorite_numbers = Column(Text, default='{}')
 
     # Дефолтная лотерея
     default_lottery = Column(String(50), default="4x20")

@@ -31,10 +31,11 @@ class UserPreferencesResponse(BaseModel):
 
 @router.get("/preferences", response_model=UserPreferencesResponse)
 async def get_user_preferences(
+    lottery_type: str = "4x20",
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Получить предпочтения пользователя"""
+    """Получить предпочтения пользователя для конкретной лотереи"""
     try:
         # Ищем существующие предпочтения
         prefs = db.query(UserPreferences).filter_by(user_id=current_user.id).first()
@@ -46,11 +47,14 @@ async def get_user_preferences(
                 default_lottery="4x20"
             )
 
-        # Парсим JSON поля
-        favorite_numbers = json.loads(prefs.favorite_numbers) if prefs.favorite_numbers else {"field1": [], "field2": []}
+        # Парсим JSON поля по лотереям
+        all_favorites = json.loads(prefs.favorite_numbers) if prefs.favorite_numbers else {}
+
+        # Получаем избранные числа для конкретной лотереи
+        lottery_favorites = all_favorites.get(lottery_type, {"field1": [], "field2": []})
 
         return UserPreferencesResponse(
-            favorite_numbers=favorite_numbers,
+            favorite_numbers=lottery_favorites,
             default_lottery=prefs.default_lottery or "4x20",
             preferred_strategies=json.loads(prefs.preferred_strategies) if prefs.preferred_strategies else [],
             notification_settings=json.loads(prefs.notification_settings) if prefs.notification_settings else {}
@@ -67,29 +71,33 @@ async def update_user_preferences(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Обновить избранные числа пользователя"""
+    """Обновить избранные числа пользователя для конкретной лотереи"""
     try:
         # Ищем существующие предпочтения
         prefs = db.query(UserPreferences).filter_by(user_id=current_user.id).first()
 
         if not prefs:
             # Создаём новые предпочтения
+            all_favorites = {data.lottery_type: data.favorite_numbers}
             prefs = UserPreferences(
                 user_id=current_user.id,
-                favorite_numbers=json.dumps(data.favorite_numbers),
+                favorite_numbers=json.dumps(all_favorites),
                 default_lottery=data.lottery_type or "4x20"
             )
             db.add(prefs)
         else:
             # Обновляем существующие
-            prefs.favorite_numbers = json.dumps(data.favorite_numbers)
+            all_favorites = json.loads(prefs.favorite_numbers) if prefs.favorite_numbers else {}
+            all_favorites[data.lottery_type] = data.favorite_numbers
+            prefs.favorite_numbers = json.dumps(all_favorites)
+
             if data.lottery_type:
                 prefs.default_lottery = data.lottery_type
 
         db.commit()
         db.refresh(prefs)
 
-        # Возвращаем обновлённые предпочтения
+        # Возвращаем обновлённые предпочтения для текущей лотереи
         return UserPreferencesResponse(
             favorite_numbers=data.favorite_numbers,
             default_lottery=prefs.default_lottery,
@@ -109,15 +117,17 @@ async def clear_favorite_numbers(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Очистить избранные числа"""
+    """Очистить избранные числа для конкретной лотереи"""
     try:
         prefs = db.query(UserPreferences).filter_by(user_id=current_user.id).first()
 
         if prefs:
-            prefs.favorite_numbers = json.dumps({"field1": [], "field2": []})
+            all_favorites = json.loads(prefs.favorite_numbers) if prefs.favorite_numbers else {}
+            all_favorites[lottery_type] = {"field1": [], "field2": []}
+            prefs.favorite_numbers = json.dumps(all_favorites)
             db.commit()
 
-        return {"status": "success", "message": "Избранные числа очищены"}
+        return {"status": "success", "message": f"Избранные числа очищены для {lottery_type}"}
 
     except Exception as e:
         logger.error(f"Ошибка очистки избранных чисел: {e}")

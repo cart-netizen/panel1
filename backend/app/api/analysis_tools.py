@@ -42,6 +42,73 @@ class CombinationEvaluationRequest(BaseModel):
     use_favorites: bool = False
 
 
+# @router.post("/patterns")
+# async def analyze_patterns(
+#     request: PatternAnalysisRequest,
+#     current_user: User = Depends(get_current_user),
+#     db: Session = Depends(get_db)
+# ):
+#     """Детальный анализ паттернов выпадения"""
+#     try:
+#         with LotteryContext(request.lottery_type):
+#             # Загружаем историю
+#             df_history = data_manager.fetch_draws_from_db()
+#
+#             if df_history.empty:
+#                 raise HTTPException(status_code=404, detail="Нет данных для анализа")
+#
+#             # Используем последние N тиражей
+#             df_analysis = df_history.tail(request.depth)
+#
+#             # Анализируем паттерны через GLOBAL_PATTERN_ANALYZER
+#             hot_cold = pattern_analyzer.GLOBAL_PATTERN_ANALYZER.analyze_hot_cold_numbers(
+#                 df_analysis,
+#                 window_sizes=[20, 50],
+#                 top_n=10
+#             )
+#
+#             # Корреляции чисел
+#             correlations = pattern_analyzer.GLOBAL_PATTERN_ANALYZER.find_number_correlations(
+#                 df_analysis
+#             )
+#
+#             # Циклы выпадения
+#             cycles = pattern_analyzer.GLOBAL_PATTERN_ANALYZER.analyze_number_cycles(
+#                 df_analysis,
+#                 top_n=10
+#             )
+#
+#             # Если включены избранные числа
+#             favorite_analysis = None
+#             if request.include_favorites:
+#                 prefs = db.query(UserPreferences).filter_by(user_id=current_user.id).first()
+#                 if prefs and prefs.favorite_numbers:
+#                     favorites = json.loads(prefs.favorite_numbers)
+#                     favorite_analysis = _analyze_favorite_numbers(
+#                         df_analysis,
+#                         favorites['field1'],
+#                         favorites['field2']
+#                     )
+#
+#             return {
+#                 "status": "success",
+#                 "patterns": {
+#                     "hot_cold": hot_cold,
+#                     "correlations": correlations,
+#                     "cycles": cycles,
+#                     "favorite_analysis": favorite_analysis
+#                 },
+#                 "analyzed_draws": len(df_analysis),
+#                 "date_range": {
+#                     "from": df_analysis['draw_date'].min().isoformat() if not df_analysis.empty else None,
+#                     "to": df_analysis['draw_date'].max().isoformat() if not df_analysis.empty else None
+#                 },
+#                 "timestamp": datetime.utcnow().isoformat()
+#             }
+#
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
+
 @router.post("/patterns")
 async def analyze_patterns(
     request: PatternAnalysisRequest,
@@ -55,59 +122,82 @@ async def analyze_patterns(
             df_history = data_manager.fetch_draws_from_db()
 
             if df_history.empty:
-                raise HTTPException(status_code=404, detail="Нет данных для анализа")
+                raise HTTPException(status_code=404, detail="Нет данных для анализа. Попробуйте обновить базу данных.")
 
-            # Используем последние N тиражей
-            df_analysis = df_history.tail(request.depth)
-
-            # Анализируем паттерны через GLOBAL_PATTERN_ANALYZER
-            hot_cold = pattern_analyzer.GLOBAL_PATTERN_ANALYZER.analyze_hot_cold_numbers(
-                df_analysis,
+            # Анализ горячих/холодных чисел
+            hot_cold_analysis = pattern_analyzer.GLOBAL_PATTERN_ANALYZER.analyze_hot_cold_numbers(
+                df_history.tail(request.depth),
                 window_sizes=[20, 50],
-                top_n=10
+                top_n=15
             )
 
-            # Корреляции чисел
-            correlations = pattern_analyzer.GLOBAL_PATTERN_ANALYZER.find_number_correlations(
-                df_analysis
-            )
+            # Анализ корреляций
+            correlations = pattern_analyzer.GLOBAL_PATTERN_ANALYZER.find_number_correlations(df_history)
 
-            # Циклы выпадения
-            cycles = pattern_analyzer.GLOBAL_PATTERN_ANALYZER.analyze_number_cycles(
-                df_analysis,
-                top_n=10
-            )
-
-            # Если включены избранные числа
-            favorite_analysis = None
+            # Анализ избранных чисел (если включен)
+            favorites_analysis = None
             if request.include_favorites:
                 prefs = db.query(UserPreferences).filter_by(user_id=current_user.id).first()
                 if prefs and prefs.favorite_numbers:
-                    favorites = json.loads(prefs.favorite_numbers)
-                    favorite_analysis = _analyze_favorite_numbers(
-                        df_analysis,
-                        favorites['field1'],
-                        favorites['field2']
-                    )
+                    all_favorites = json.loads(prefs.favorite_numbers)
+                    lottery_favorites = all_favorites.get(request.lottery_type, {"field1": [], "field2": []})
+                    if lottery_favorites['field1'] or lottery_favorites['field2']:
+                        favorites_analysis = _analyze_favorite_numbers(
+                            df_history,
+                            lottery_favorites['field1'],
+                            lottery_favorites['field2']
+                        )
 
-            return {
+            # Формируем результат
+            result = {
                 "status": "success",
-                "patterns": {
-                    "hot_cold": hot_cold,
-                    "correlations": correlations,
-                    "cycles": cycles,
-                    "favorite_analysis": favorite_analysis
+                "hot_cold": {
+                    "field1": {
+                        "hot": hot_cold_analysis.get('field1_window_20', {}).get('hot_numbers', []),
+                        "cold": hot_cold_analysis.get('field1_window_20', {}).get('cold_numbers', [])
+                    },
+                    "field2": {
+                        "hot": hot_cold_analysis.get('field2_window_20', {}).get('hot_numbers', []),
+                        "cold": hot_cold_analysis.get('field2_window_20', {}).get('cold_numbers', [])
+                    }
                 },
-                "analyzed_draws": len(df_analysis),
+                "correlations": {
+                    "field1": [
+                        {
+                            "pair": f"{p[0]}-{p[1]}",
+                            "frequency_percent": round(freq, 1),
+                            "count": count
+                        }
+                        for p, count, freq in correlations.get('field1', {}).get('frequent_pairs', [])[:10]
+                    ],
+                    "field2": [
+                        {
+                            "pair": f"{p[0]}-{p[1]}",
+                            "frequency_percent": round(freq, 1),
+                            "count": count
+                        }
+                        for p, count, freq in correlations.get('field2', {}).get('frequent_pairs', [])[:10]
+                    ]
+                },
+                "favorites_analysis": favorites_analysis,
+                "data_stats": {
+                    "total_draws": len(df_history),
+                    "analyzed_period": request.depth,
+                    "lottery_type": request.lottery_type
+                },
                 "date_range": {
-                    "from": df_analysis['draw_date'].min().isoformat() if not df_analysis.empty else None,
-                    "to": df_analysis['draw_date'].max().isoformat() if not df_analysis.empty else None
+                    "from": df_history['Дата'].min().isoformat() if not df_history.empty else None,
+                    "to": df_history['Дата'].max().isoformat() if not df_history.empty else None
                 },
                 "timestamp": datetime.utcnow().isoformat()
             }
+        return result
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import traceback
+        print(f"Ошибка анализа паттернов: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Ошибка анализа: {str(e)}")
 
 
 @router.post("/clusters")
@@ -450,59 +540,78 @@ def _evaluate_sequences(field1, field2):
 
 def _check_uniqueness(field1, field2, df_history):
     """Проверка уникальности комбинации"""
-    # Проверяем, встречалась ли такая комбинация ранее
+    combo_str = f"{sorted(field1)}-{sorted(field2)}"
+
+    # Проверяем, встречалась ли такая комбинация
     for _, row in df_history.iterrows():
-        if (set(row['field1_numbers']) == set(field1) and
-            set(row['field2_numbers']) == set(field2)):
+        if (sorted(row['Числа_Поле1_list']) == sorted(field1) and
+            sorted(row['Числа_Поле2_list']) == sorted(field2)):
             return 0  # Комбинация уже выпадала
 
-    # Проверяем частичные совпадения
-    max_match = 0
+    # Проверяем похожие комбинации (с пересечением > 80%)
     for _, row in df_history.iterrows():
-        match_f1 = len(set(row['field1_numbers']) & set(field1))
-        match_f2 = len(set(row['field2_numbers']) & set(field2))
-        max_match = max(max_match, match_f1 + match_f2)
+        f1_intersection = len(set(field1) & set(row['Числа_Поле1_list']))
+        f2_intersection = len(set(field2) & set(row['Числа_Поле2_list']))
 
-    # Чем меньше совпадений, тем выше уникальность
-    if max_match <= 2:
-        return 15
-    elif max_match <= 4:
-        return 10
-    elif max_match <= 6:
-        return 5
-    else:
-        return 0
+        total_numbers = len(field1) + len(field2)
+        total_intersections = f1_intersection + f2_intersection
+
+        similarity = total_intersections / total_numbers
+
+        if similarity > 0.8:
+            return 5  # Очень похожая комбинация
+        elif similarity > 0.6:
+            return 10  # Частично похожая
+
+    return 15  # Уникальная комбинация
 
 
 def _generate_improvement_suggestions(score, hot_count, cold_count, field1, field2):
-    """Генерация предложений по улучшению комбинации"""
+    """Генерация рекомендаций для улучшения"""
     suggestions = []
 
     if score < 40:
-        suggestions.append("💡 Добавьте больше горячих чисел из текущих трендов")
+        if hot_count < 2:
+            suggestions.append("Добавьте больше горячих чисел (2-3 шт)")
+        if cold_count < 1:
+            suggestions.append("Включите 1-2 холодных числа для баланса")
 
-    if hot_count == 0:
-        suggestions.append("🔥 Включите хотя бы 2-3 горячих числа")
+        # Проверка на последовательности
+        sequences_f1 = _count_sequences(field1)
+        sequences_f2 = _count_sequences(field2)
 
-    if cold_count == 0:
-        suggestions.append("❄️ Добавьте 1-2 холодных числа, готовых к выходу")
+        if sequences_f1 > 2:
+            suggestions.append("Уменьшите количество последовательных чисел в поле 1")
+        if sequences_f2 > 1:
+            suggestions.append("Избегайте последовательных чисел в поле 2")
 
-    # Проверка на слишком много последовательных чисел
-    for field in [field1, field2]:
-        sorted_field = sorted(field)
-        max_seq = 1
-        current_seq = 1
-        for i in range(1, len(sorted_field)):
-            if sorted_field[i] == sorted_field[i-1] + 1:
-                current_seq += 1
-                max_seq = max(max_seq, current_seq)
-            else:
-                current_seq = 1
+        # Проверка распределения
+        if len(field1) > 2:
+            spread_f1 = max(field1) - min(field1)
+            if spread_f1 < len(field1) * 2:
+                suggestions.append("Увеличьте разброс чисел в поле 1")
 
-        if max_seq > 3:
-            suggestions.append("🔢 Избегайте длинных последовательностей чисел")
+    elif score < 70:
+        suggestions.append("Хорошая база, попробуйте заменить 1-2 числа на более горячие")
+        suggestions.append("Проверьте корреляции - возможно есть удачные пары")
 
     if not suggestions:
-        suggestions.append("✨ Комбинация хорошо сбалансирована")
+        suggestions.append("Отличная комбинация! Можно играть как есть")
 
     return suggestions
+
+
+
+def _count_sequences(numbers):
+    """Подсчет последовательных чисел"""
+    if len(numbers) < 2:
+        return 0
+
+    sorted_nums = sorted(numbers)
+    sequences = 0
+
+    for i in range(1, len(sorted_nums)):
+        if sorted_nums[i] == sorted_nums[i - 1] + 1:
+            sequences += 1
+
+    return sequences
