@@ -213,12 +213,6 @@ def login_json(credentials: JsonLoginRequest):
 
     return {"access_token": access_token, "token_type": "bearer"}
 
-@router.get("/refresh", response_model=UserResponse, summary="Обновить профиль из БД")
-def refresh_user_profile(current_user = Depends(get_current_user)):
-    """
-    Принудительно обновляет профиль пользователя из базы данных.
-    """
-    return current_user
 
 @router.get("/verify-token", summary="Проверить валидность токена")
 def verify_token_endpoint(current_user = Depends(get_current_user)):

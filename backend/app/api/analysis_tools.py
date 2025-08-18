@@ -41,74 +41,6 @@ class CombinationEvaluationRequest(BaseModel):
     field2: List[int]
     use_favorites: bool = False
 
-
-# @router.post("/patterns")
-# async def analyze_patterns(
-#     request: PatternAnalysisRequest,
-#     current_user: User = Depends(get_current_user),
-#     db: Session = Depends(get_db)
-# ):
-#     """Детальный анализ паттернов выпадения"""
-#     try:
-#         with LotteryContext(request.lottery_type):
-#             # Загружаем историю
-#             df_history = data_manager.fetch_draws_from_db()
-#
-#             if df_history.empty:
-#                 raise HTTPException(status_code=404, detail="Нет данных для анализа")
-#
-#             # Используем последние N тиражей
-#             df_analysis = df_history.tail(request.depth)
-#
-#             # Анализируем паттерны через GLOBAL_PATTERN_ANALYZER
-#             hot_cold = pattern_analyzer.GLOBAL_PATTERN_ANALYZER.analyze_hot_cold_numbers(
-#                 df_analysis,
-#                 window_sizes=[20, 50],
-#                 top_n=10
-#             )
-#
-#             # Корреляции чисел
-#             correlations = pattern_analyzer.GLOBAL_PATTERN_ANALYZER.find_number_correlations(
-#                 df_analysis
-#             )
-#
-#             # Циклы выпадения
-#             cycles = pattern_analyzer.GLOBAL_PATTERN_ANALYZER.analyze_number_cycles(
-#                 df_analysis,
-#                 top_n=10
-#             )
-#
-#             # Если включены избранные числа
-#             favorite_analysis = None
-#             if request.include_favorites:
-#                 prefs = db.query(UserPreferences).filter_by(user_id=current_user.id).first()
-#                 if prefs and prefs.favorite_numbers:
-#                     favorites = json.loads(prefs.favorite_numbers)
-#                     favorite_analysis = _analyze_favorite_numbers(
-#                         df_analysis,
-#                         favorites['field1'],
-#                         favorites['field2']
-#                     )
-#
-#             return {
-#                 "status": "success",
-#                 "patterns": {
-#                     "hot_cold": hot_cold,
-#                     "correlations": correlations,
-#                     "cycles": cycles,
-#                     "favorite_analysis": favorite_analysis
-#                 },
-#                 "analyzed_draws": len(df_analysis),
-#                 "date_range": {
-#                     "from": df_analysis['draw_date'].min().isoformat() if not df_analysis.empty else None,
-#                     "to": df_analysis['draw_date'].max().isoformat() if not df_analysis.empty else None
-#                 },
-#                 "timestamp": datetime.utcnow().isoformat()
-#             }
-#
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
-
 @router.post("/patterns")
 async def analyze_patterns(
     request: PatternAnalysisRequest,
@@ -124,15 +56,11 @@ async def analyze_patterns(
             if df_history.empty:
                 raise HTTPException(status_code=404, detail="Нет данных для анализа. Попробуйте обновить базу данных.")
 
-            # Анализ горячих/холодных чисел
-            hot_cold_analysis = pattern_analyzer.GLOBAL_PATTERN_ANALYZER.analyze_hot_cold_numbers(
-                df_history.tail(request.depth),
-                window_sizes=[20, 50],
-                top_n=15
-            )
+            # Используем упрощенный анализ
+            hot_cold_analysis = _analyze_hot_cold_simple(df_history.tail(request.depth))
 
-            # Анализ корреляций
-            correlations = pattern_analyzer.GLOBAL_PATTERN_ANALYZER.find_number_correlations(df_history)
+            # Анализ корреляций (упрощенный)
+            correlations = _analyze_correlations_simple(df_history.tail(request.depth))
 
             # Анализ избранных чисел (если включен)
             favorites_analysis = None
@@ -151,34 +79,8 @@ async def analyze_patterns(
             # Формируем результат
             result = {
                 "status": "success",
-                "hot_cold": {
-                    "field1": {
-                        "hot": hot_cold_analysis.get('field1_window_20', {}).get('hot_numbers', []),
-                        "cold": hot_cold_analysis.get('field1_window_20', {}).get('cold_numbers', [])
-                    },
-                    "field2": {
-                        "hot": hot_cold_analysis.get('field2_window_20', {}).get('hot_numbers', []),
-                        "cold": hot_cold_analysis.get('field2_window_20', {}).get('cold_numbers', [])
-                    }
-                },
-                "correlations": {
-                    "field1": [
-                        {
-                            "pair": f"{p[0]}-{p[1]}",
-                            "frequency_percent": round(freq, 1),
-                            "count": count
-                        }
-                        for p, count, freq in correlations.get('field1', {}).get('frequent_pairs', [])[:10]
-                    ],
-                    "field2": [
-                        {
-                            "pair": f"{p[0]}-{p[1]}",
-                            "frequency_percent": round(freq, 1),
-                            "count": count
-                        }
-                        for p, count, freq in correlations.get('field2', {}).get('frequent_pairs', [])[:10]
-                    ]
-                },
+                "hot_cold": hot_cold_analysis,
+                "correlations": correlations,
                 "favorites_analysis": favorites_analysis,
                 "data_stats": {
                     "total_draws": len(df_history),
@@ -191,7 +93,9 @@ async def analyze_patterns(
                 },
                 "timestamp": datetime.utcnow().isoformat()
             }
-        return result
+            print("🔍 Отправляем результат анализа паттернов:", result)
+
+            return result
 
     except Exception as e:
         import traceback
@@ -199,6 +103,58 @@ async def analyze_patterns(
         print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Ошибка анализа: {str(e)}")
 
+
+def _analyze_correlations_simple(df_history, top_n=5):
+    """Упрощенный анализ корреляций между числами"""
+
+    correlations = {
+        "field1": [],
+        "field2": []
+    }
+
+    # Анализ пар в поле 1
+    from collections import Counter
+    field1_pairs = Counter()
+
+    for _, row in df_history.iterrows():
+        numbers = row['Числа_Поле1_list']
+        # Генерируем все пары
+        for i in range(len(numbers)):
+            for j in range(i + 1, len(numbers)):
+                pair = tuple(sorted([numbers[i], numbers[j]]))
+                field1_pairs[pair] += 1
+
+    # Топ пары для поля 1
+    total_draws = len(df_history)
+    for pair, count in field1_pairs.most_common(top_n):
+        frequency = (count / total_draws) * 100
+        correlations["field1"].append({
+            "pair": f"{pair[0]}-{pair[1]}",
+            "frequency_percent": round(frequency, 1),
+            "count": count
+        })
+
+    # Анализ пар в поле 2
+    field2_pairs = Counter()
+
+    for _, row in df_history.iterrows():
+        numbers = row['Числа_Поле2_list']
+        if len(numbers) >= 2:  # Только если есть минимум 2 числа
+            for i in range(len(numbers)):
+                for j in range(i + 1, len(numbers)):
+                    pair = tuple(sorted([numbers[i], numbers[j]]))
+                    field2_pairs[pair] += 1
+
+    # Топ пары для поля 2
+    for pair, count in field2_pairs.most_common(top_n):
+        frequency = (count / total_draws) * 100
+        correlations["field2"].append({
+            "pair": f"{pair[0]}-{pair[1]}",
+            "frequency_percent": round(frequency, 1),
+            "count": count
+        })
+
+    return correlations
 
 @router.post("/clusters")
 async def analyze_clusters(
@@ -256,7 +212,10 @@ async def analyze_clusters(
             }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import traceback
+        print(f"Ошибка кластерного анализа: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Ошибка кластеризации: {str(e)}")
 
 
 @router.post("/evaluate")
@@ -277,17 +236,13 @@ async def evaluate_combination(
             score = 0.0
             factors = []
 
-            # 1. Анализ горячих/холодных чисел
-            hot_cold_analysis = pattern_analyzer.GLOBAL_PATTERN_ANALYZER.analyze_hot_cold_numbers(
-                df_history.tail(50),
-                window_sizes=[20],
-                top_n=15
-            )
+            # 1. Анализ горячих/холодных чисел (упрощенный без GLOBAL_PATTERN_ANALYZER)
+            hot_cold_analysis = _analyze_hot_cold_simple(df_history)
 
-            hot_f1 = hot_cold_analysis.get('field1_window_20', {}).get('hot_numbers', [])
-            hot_f2 = hot_cold_analysis.get('field2_window_20', {}).get('hot_numbers', [])
-            cold_f1 = hot_cold_analysis.get('field1_window_20', {}).get('cold_numbers', [])
-            cold_f2 = hot_cold_analysis.get('field2_window_20', {}).get('cold_numbers', [])
+            hot_f1 = hot_cold_analysis.get('field1', {}).get('hot_numbers', [])
+            hot_f2 = hot_cold_analysis.get('field2', {}).get('hot_numbers', [])
+            cold_f1 = hot_cold_analysis.get('field1', {}).get('cold_numbers', [])
+            cold_f2 = hot_cold_analysis.get('field2', {}).get('cold_numbers', [])
 
             hot_count = len(set(request.field1) & set(hot_f1)) + len(set(request.field2) & set(hot_f2))
             cold_count = len(set(request.field1) & set(cold_f1)) + len(set(request.field2) & set(cold_f2))
@@ -303,38 +258,13 @@ async def evaluate_combination(
                 score += 20
                 factors.append(f"🔄 Содержит {cold_count} холодных чисел, готовых к выходу (+20)")
 
-            # 2. Проверка последовательностей и интервалов
-            seq_score = _evaluate_sequences(request.field1, request.field2)
-            score += seq_score
-            if seq_score > 0:
-                factors.append(f"📊 Хорошее распределение чисел (+{seq_score})")
+            # 2. Анализ последовательностей
+            sequence_score = _evaluate_sequences(request.field1, request.field2)
+            score += sequence_score
+            if sequence_score > 0:
+                factors.append(f"📊 Хорошее распределение чисел (+{sequence_score})")
 
-            # 3. AI-оценка через модель
-            if ai_model.GLOBAL_AI_MODEL.models_trained:
-                try:
-                    ai_score = ai_model.GLOBAL_AI_MODEL.evaluate_combination(
-                        request.field1, request.field2
-                    )
-                    normalized_ai_score = min(30, ai_score * 30)  # Нормализуем до 30 баллов
-                    score += normalized_ai_score
-                    factors.append(f"🤖 AI-оценка: {normalized_ai_score:.1f}/30")
-                except:
-                    pass  # Если модель не готова, пропускаем
-
-            # 4. Проверка избранных чисел
-            if request.use_favorites:
-                prefs = db.query(UserPreferences).filter_by(user_id=current_user.id).first()
-                if prefs and prefs.favorite_numbers:
-                    favorites = json.loads(prefs.favorite_numbers)
-                    fav_match_f1 = len(set(request.field1) & set(favorites.get('field1', [])))
-                    fav_match_f2 = len(set(request.field2) & set(favorites.get('field2', [])))
-
-                    if fav_match_f1 + fav_match_f2 > 0:
-                        bonus = min(15, (fav_match_f1 + fav_match_f2) * 3)
-                        score += bonus
-                        factors.append(f"⭐ Использует {fav_match_f1 + fav_match_f2} избранных чисел (+{bonus})")
-
-            # 5. Проверка на уникальность
+            # 3. Проверка на уникальность
             uniqueness = _check_uniqueness(request.field1, request.field2, df_history)
             score += uniqueness
             if uniqueness > 10:
@@ -370,8 +300,45 @@ async def evaluate_combination(
             }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import traceback
+        print(f"Ошибка оценки комбинации: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Ошибка оценки: {str(e)}")
 
+
+def _analyze_hot_cold_simple(df_history, window=20, top_n=10):
+    """Упрощенный анализ горячих/холодных чисел без GLOBAL_PATTERN_ANALYZER"""
+
+    # Берем последние window тиражей
+    recent_df = df_history.tail(window)
+
+    analysis = {
+        "field1": {"hot_numbers": [], "cold_numbers": []},
+        "field2": {"hot_numbers": [], "cold_numbers": []}
+    }
+
+    # Анализ поля 1
+    field1_counter = {}
+    for _, row in recent_df.iterrows():
+        for num in row['Числа_Поле1_list']:
+            field1_counter[num] = field1_counter.get(num, 0) + 1
+
+    # Сортируем по частоте
+    sorted_f1 = sorted(field1_counter.items(), key=lambda x: x[1], reverse=True)
+    analysis["field1"]["hot_numbers"] = [num for num, _ in sorted_f1[:top_n]]
+    analysis["field1"]["cold_numbers"] = [num for num, _ in sorted_f1[-top_n:]]
+
+    # Анализ поля 2
+    field2_counter = {}
+    for _, row in recent_df.iterrows():
+        for num in row['Числа_Поле2_list']:
+            field2_counter[num] = field2_counter.get(num, 0) + 1
+
+    sorted_f2 = sorted(field2_counter.items(), key=lambda x: x[1], reverse=True)
+    analysis["field2"]["hot_numbers"] = [num for num, _ in sorted_f2[:top_n]]
+    analysis["field2"]["cold_numbers"] = [num for num, _ in sorted_f2[-top_n:]]
+
+    return analysis
 
 # Вспомогательные функции
 def _analyze_favorite_numbers(df, favorites_f1, favorites_f2):
@@ -382,14 +349,14 @@ def _analyze_favorite_numbers(df, favorites_f1, favorites_f2):
     }
 
     for num in favorites_f1:
-        count = sum(num in row for row in df['field1_numbers'])
+        count = sum(num in row for row in df['Числа_Поле1_list'])  # ← Исправить
         analysis["field1"][num] = {
             "frequency": count,
             "percentage": (count / len(df)) * 100 if len(df) > 0 else 0
         }
 
     for num in favorites_f2:
-        count = sum(num in row for row in df['field2_numbers'])
+        count = sum(num in row for row in df['Числа_Поле2_list'])  # ← Исправить
         analysis["field2"][num] = {
             "frequency": count,
             "percentage": (count / len(df)) * 100 if len(df) > 0 else 0
@@ -402,17 +369,24 @@ def _prepare_clustering_features(df, field_name, max_num):
     """Подготовка признаков для кластеризации"""
     features = {}
 
+    # Исправить определение колонки
+    if 'field1' in field_name:
+        column_name = 'Числа_Поле1_list'
+    else:
+        column_name = 'Числа_Поле2_list'
+
+
     for num in range(1, max_num + 1):
         # Частота появления
-        frequency = sum(num in row for row in df[field_name])
+        frequency = sum(num in row for row in df[column_name])
 
         # Среднее расстояние между появлениями
-        appearances = [i for i, row in enumerate(df[field_name]) if num in row]
+        appearances = [i for i, row in enumerate(df[column_name]) if num in row]
         avg_gap = np.mean(np.diff(appearances)) if len(appearances) > 1 else len(df)
 
         # Тренд (появления в последних 20% тиражей)
         recent_df = df.tail(max(1, len(df) // 5))
-        recent_freq = sum(num in row for row in recent_df[field_name])
+        recent_freq = sum(num in row for row in recent_df[column_name])
 
         features[num] = [frequency, avg_gap, recent_freq]
 
@@ -461,25 +435,28 @@ def _interpret_clusters(clusters_f1, clusters_f2, df_history):
     """Интерпретация кластеров"""
     interpretation = {}
 
-    # Группировка по кластерам
-    for field, clusters in [("field1", clusters_f1), ("field2", clusters_f2)]:
+    # Группировка по кластерам для обоих полей
+    for field_name, clusters in [("field1", clusters_f1), ("field2", clusters_f2)]:
         cluster_groups = {}
         for num, cluster_id in clusters.items():
             if cluster_id not in cluster_groups:
                 cluster_groups[cluster_id] = []
             cluster_groups[cluster_id].append(num)
 
+        # Исправляем название колонки
+        column_name = 'Числа_Поле1_list' if field_name == 'field1' else 'Числа_Поле2_list'
+
         # Интерпретация каждого кластера
         for cluster_id, numbers in cluster_groups.items():
             if cluster_id == -1:  # DBSCAN outliers
-                interpretation[f"{field}_outliers"] = {
+                interpretation[f"{field_name}_outliers"] = {
                     "numbers": numbers,
                     "description": "Аномальные числа с уникальными паттернами"
                 }
             else:
                 # Анализ характеристик кластера
                 avg_frequency = np.mean([
-                    sum(num in row for row in df_history[f'{field}_numbers'])
+                    sum(num in row for row in df_history[column_name])
                     for num in numbers
                 ])
 
@@ -490,7 +467,7 @@ def _interpret_clusters(clusters_f1, clusters_f2, df_history):
                 else:
                     desc = "Нейтральный кластер - средняя активность"
 
-                interpretation[f"{field}_cluster_{cluster_id}"] = {
+                interpretation[f"{field_name}_cluster_{cluster_id}"] = {
                     "numbers": numbers,
                     "description": desc,
                     "avg_frequency": round(avg_frequency, 2)
