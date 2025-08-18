@@ -55,7 +55,7 @@ class BankrollSimulationRequest(BaseModel):
     num_simulations: int = 1000
     num_draws: int = 100
     risk_level: float = 0.02  # 2% риска по умолчанию
-
+    bet_size: float = 100.0
 
 @router.post("/strategy")
 async def simulate_strategy(
@@ -65,23 +65,29 @@ async def simulate_strategy(
 ):
     """Детальная симуляция стратегии на исторических данных"""
     try:
+        logger.info(f"🚀 Запуск симуляции стратегии: {request.strategy} для {request.lottery_type}")
+        logger.info(
+            f"📊 Параметры: тиражей={request.num_draws}, банкролл={request.initial_bankroll}, ставка={request.bet_size}")
+
         with LotteryContext(request.lottery_type):
             df_history = data_manager.fetch_draws_from_db()
 
             if len(df_history) < request.num_draws:
+                logger.warning(f"⚠️ Недостаточно данных: доступно {len(df_history)}, запрошено {request.num_draws}")
                 raise HTTPException(
                     status_code=400,
                     detail=f"Недостаточно данных. Доступно {len(df_history)} тиражей"
                 )
 
             config = data_manager.get_current_config()
+            logger.info(f"🎯 Конфигурация лотереи: {config.get('name', 'Unknown')}")
 
-            # Инициализация банкролл менеджера
+            # Инициализация банкролл менеджера (ИСПРАВЛЕННАЯ ВЕРСИЯ)
             bankroll_mgr = BankrollManager(
                 initial_bankroll=request.initial_bankroll,
-                min_bet=request.bet_size,
-                max_bet=request.bet_size * 10
+                ticket_cost=request.bet_size
             )
+            logger.info(f"💰 BankrollManager инициализирован: банкролл={request.initial_bankroll}, цена билета={request.bet_size}")
 
             # Выбираем стратегию ставок
             if request.strategy in ["martingale", "fibonacci"]:
@@ -217,9 +223,14 @@ async def simulate_strategy(
                 "timestamp": datetime.utcnow().isoformat()
             }
 
+            logger.info(f"✅ Результат симуляции: ROI={result['roi']}%, WinRate={result['win_rate']}%")
+            logger.info(f"📊 Структура результата: {list(result.keys())}")
+
     except Exception as e:
-        logger.error(f"Ошибка симуляции стратегии: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"❌ Ошибка симуляции стратегии: {e}")
+        logger.error(f"❌ Тип ошибки: {type(e).__name__}")
+        logger.error(f"❌ Трассировка: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Ошибка симуляции стратегии: {str(e)}")
 
 
 @router.post("/roi")
@@ -229,135 +240,200 @@ async def calculate_roi(
 ):
     """Продвинутый расчёт ROI с учётом реальной статистики"""
     try:
+        logger.info(f"💰 Запуск расчёта ROI: инвестиции={request.investment}, билет={request.ticket_price}")
         with LotteryContext(request.lottery_type):
             df_history = data_manager.fetch_draws_from_db()
 
             if df_history.empty:
                 raise HTTPException(status_code=404, detail="Нет исторических данных")
 
-                # Анализ реальных выигрышей в истории
-                config = data_manager.get_current_config()
+            logger.info(f"📊 Использование {len(df_history)} тиражей для ROI расчёта")
+            # Анализ реальных выигрышей в истории
+            config = data_manager.get_current_config()
 
-                # Расчёт базовых параметров
-                num_tickets = int(request.investment / request.ticket_price)
-                draws_per_week = 2  # Обычно 2 тиража в неделю
-                total_draws = (request.duration_days // 7) * draws_per_week
+            # Расчёт базовых параметров
+            num_tickets = int(request.investment / request.ticket_price)
+            draws_per_week = 2  # Обычно 2 тиража в неделю
+            total_draws = (request.duration_days // 7) * draws_per_week
 
-                # Анализируем реальные вероятности на основе истории
-                win_probabilities = _calculate_real_win_probabilities(df_history, config)
+            logger.info(f"🎫 Билетов: {num_tickets}, Тиражей: {total_draws}")
 
-                # Моделируем различные сценарии на основе реальных данных
-                scenarios = {}
+            # Анализируем реальные вероятности на основе истории
+            win_probabilities = _calculate_real_win_probabilities(df_history, config)
 
-                # Пессимистичный сценарий (нижний квартиль)
-                scenarios["pessimistic"] = _simulate_roi_scenario(
-                    num_tickets=num_tickets,
-                    total_draws=total_draws,
-                    win_rate=win_probabilities['low'],
-                    avg_prize=win_probabilities['avg_prize'] * 0.7,
-                    investment=request.investment
-                )
+            # Моделируем различные сценарии на основе реальных данных
+            scenarios = {}
 
-                # Реалистичный сценарий (медиана)
-                scenarios["realistic"] = _simulate_roi_scenario(
-                    num_tickets=num_tickets,
-                    total_draws=total_draws,
-                    win_rate=win_probabilities['median'],
-                    avg_prize=win_probabilities['avg_prize'],
-                    investment=request.investment
-                )
+            # Пессимистичный сценарий (нижний квартиль)
+            scenarios["pessimistic"] = _simulate_roi_scenario(
+                num_tickets=num_tickets,
+                total_draws=total_draws,
+                win_rate=win_probabilities['low'],
+                avg_prize=win_probabilities['avg_prize'] * 0.7,
+                investment=request.investment
+            )
 
-                # Оптимистичный сценарий (верхний квартиль)
-                scenarios["optimistic"] = _simulate_roi_scenario(
-                    num_tickets=num_tickets,
-                    total_draws=total_draws,
-                    win_rate=win_probabilities['high'],
-                    avg_prize=win_probabilities['avg_prize'] * 1.5,
-                    investment=request.investment
-                )
+            # Реалистичный сценарий (медиана)
+            scenarios["realistic"] = _simulate_roi_scenario(
+                num_tickets=num_tickets,
+                total_draws=total_draws,
+                win_rate=win_probabilities['median'],
+                avg_prize=win_probabilities['avg_prize'],
+                investment=request.investment
+            )
 
-                # Монте-Карло симуляция для более точной оценки
-                monte_carlo_results = _monte_carlo_roi_simulation(
-                    num_tickets=num_tickets,
-                    total_draws=total_draws,
-                    investment=request.investment,
-                    win_probabilities=win_probabilities,
-                    num_simulations=1000
-                )
+            # Оптимистичный сценарий (верхний квартиль)
+            scenarios["optimistic"] = _simulate_roi_scenario(
+                num_tickets=num_tickets,
+                total_draws=total_draws,
+                win_rate=win_probabilities['high'],
+                avg_prize=win_probabilities['avg_prize'] * 1.5,
+                investment=request.investment
+            )
 
-                return {
-                    "status": "success",
-                    "investment": request.investment,
-                    "ticket_price": request.ticket_price,
-                    "num_tickets": num_tickets,
-                    "duration_days": request.duration_days,
-                    "total_draws": total_draws,
-                    "scenarios": scenarios,
-                    "monte_carlo": monte_carlo_results,
-                    "recommendation": _get_roi_recommendation(scenarios, monte_carlo_results),
-                    "risk_assessment": _assess_risk_level(scenarios, monte_carlo_results),
-                    "timestamp": datetime.utcnow().isoformat()
-                }
+            # Монте-Карло симуляция для более точной оценки
+            monte_carlo_results = _monte_carlo_roi_simulation(
+                num_tickets=num_tickets,
+                total_draws=total_draws,
+                investment=request.investment,
+                win_probabilities=win_probabilities,
+                num_simulations=1000
+            )
+            logger.info(f"✅ ROI расчёт завершён успешно")
+
+            return {
+                "status": "success",
+                "investment": request.investment,
+                "ticket_price": request.ticket_price,
+                "num_tickets": num_tickets,
+                "duration_days": request.duration_days,
+                "total_draws": total_draws,
+                "scenarios": scenarios,
+                "monte_carlo": monte_carlo_results,
+                "recommendation": _get_roi_recommendation(scenarios, monte_carlo_results),
+                "risk_assessment": _assess_risk_level(scenarios, monte_carlo_results),
+                "timestamp": datetime.utcnow().isoformat()
+            }
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/compare")
 async def compare_methods(
-    lottery_type: str = "4x20",
-    num_simulations: int = 100,
-    current_user: User = Depends(get_current_user)
+    lottery_type: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
 ):
-    """Сравнение различных методов генерации на реальных данных"""
+    """Сравнение различных методов генерации комбинаций"""
     try:
+        logger.info(f"⚖️ Запуск сравнения методов для {lottery_type}")
+
         with LotteryContext(lottery_type):
             df_history = data_manager.fetch_draws_from_db()
 
-            if len(df_history) < 100:
-                raise HTTPException(status_code=400, detail="Недостаточно данных для сравнения")
+            if df_history.empty:
+                logger.warning(f"⚠️ Нет исторических данных для {lottery_type}")
+                raise HTTPException(status_code=404, detail="Нет исторических данных")
 
+            logger.info(f"📊 Доступно {len(df_history)} тиражей для сравнения")
             config = data_manager.get_current_config()
-            methods = ["random", "hot", "cold", "mixed", "ai", "pattern"]
-            comparison = []
 
-            # Тестируем каждый метод
+            # Методы для сравнения
+            methods = ["random", "hot", "cold", "mixed", "ai"]
+            comparison_results = []
+
             for method in methods:
-                method_results = _test_generation_method(
-                    method=method,
-                    df_history=df_history,
-                    config=config,
-                    num_simulations=num_simulations
-                )
+                try:
+                    logger.info(f"🧪 Тестирование метода: {method}")
 
-                comparison.append({
-                    "method": method,
-                    "avg_score": round(method_results['avg_score'], 1),
-                    "win_rate": round(method_results['win_rate'], 2),
-                    "roi": round(method_results['roi'], 2),
-                    "consistency": round(method_results['consistency'], 2),
-                    "complexity": _get_method_complexity(method),
-                    "recommended_for": _get_method_recommendation(method, method_results),
-                    "pros": method_results['pros'],
-                    "cons": method_results['cons']
-                })
+                    method_result = _test_generation_method(method, df_history, config, 50)
+                    comparison_results.append(method_result)
+                    logger.info(f"✅ Метод {method} протестирован")
 
-            # Сортируем по среднему скору
-            comparison.sort(key=lambda x: x["avg_score"], reverse=True)
+                except Exception as method_error:
+                    logger.error(f"❌ Ошибка тестирования метода {method}: {method_error}")
+                    continue
+
+            if not comparison_results:
+                raise HTTPException(status_code=500, detail="Не удалось протестировать ни один метод")
+
+            # Определяем лучший метод
+            best_method = max(comparison_results, key=lambda x: x['avg_score'])
+            logger.info(f"🏆 Лучший метод: {best_method['method']}")
 
             return {
                 "status": "success",
-                "lottery_type": lottery_type,
-                "comparison": comparison,
-                "best_overall": comparison[0]["method"],
-                "best_for_beginners": next(m["method"] for m in comparison if "Новички" in m["recommended_for"]),
-                "best_roi": max(comparison, key=lambda x: x["roi"])["method"],
-                "most_consistent": max(comparison, key=lambda x: x["consistency"])["method"],
-                "analysis_based_on": f"{len(df_history)} исторических тиражей",
+                "comparison": comparison_results,
+                "best_overall": best_method['method'],
+                "summary": f"Протестировано {len(comparison_results)} методов",
                 "timestamp": datetime.utcnow().isoformat()
             }
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"❌ Ошибка сравнения методов: {e}")
+        logger.error(f"❌ Тип ошибки: {type(e).__name__}")
+        raise HTTPException(status_code=500, detail=f"Ошибка сравнения методов: {str(e)}")
+#     lottery_type: str = "4x20",
+#     num_simulations: int = 100,
+#     current_user: User = Depends(get_current_user),
+#     db: Session = Depends(get_db)
+# ):
+#     """Сравнение различных методов генерации на реальных данных"""
+#     try:
+#         logger.info(f"⚖️ Запуск сравнения методов для {lottery_type}")
+#
+#         with LotteryContext(lottery_type):
+#             df_history = data_manager.fetch_draws_from_db()
+#
+#             if len(df_history) < 100:
+#                 raise HTTPException(status_code=400, detail="Недостаточно данных для сравнения")
+#
+#             logger.info(f"📊 Доступно {len(df_history)} тиражей для сравнения")
+#
+#             config = data_manager.get_current_config()
+#             methods = ["random", "hot", "cold", "mixed", "ai", "pattern"]
+#             comparison = []
+#
+#             # Тестируем каждый метод
+#             for method in methods:
+#                 method_results = _test_generation_method(
+#                     method=method,
+#                     df_history=df_history,
+#                     config=config,
+#                     num_simulations=num_simulations
+#                 )
+#
+#                 comparison.append({
+#                     "method": method,
+#                     "avg_score": round(method_results['avg_score'], 1),
+#                     "win_rate": round(method_results['win_rate'], 2),
+#                     "roi": round(method_results['roi'], 2),
+#                     "consistency": round(method_results['consistency'], 2),
+#                     "complexity": _get_method_complexity(method),
+#                     "recommended_for": _get_method_recommendation(method, method_results),
+#                     "pros": method_results['pros'],
+#                     "cons": method_results['cons']
+#                 })
+#
+#             # Сортируем по среднему скору
+#             comparison.sort(key=lambda x: x["avg_score"], reverse=True)
+#
+#             return {
+#                 "status": "success",
+#                 "lottery_type": lottery_type,
+#                 "comparison": comparison,
+#                 "best_overall": comparison[0]["method"],
+#                 "best_for_beginners": next(m["method"] for m in comparison if "Новички" in m["recommended_for"]),
+#                 "best_roi": max(comparison, key=lambda x: x["roi"])["method"],
+#                 "most_consistent": max(comparison, key=lambda x: x["consistency"])["method"],
+#                 "analysis_based_on": f"{len(df_history)} исторических тиражей",
+#                 "timestamp": datetime.utcnow().isoformat()
+#             }
+#
+#     except Exception as e:
+#         logger.error(f"❌ Ошибка сравнения методов: {e}")
+#         logger.error(f"❌ Тип ошибки: {type(e).__name__}")
+#         raise HTTPException(status_code=500, detail=f"Ошибка сравнения методов: {str(e)}")
 
 @router.post("/bankroll")
 async def simulate_bankroll_management(
@@ -366,13 +442,29 @@ async def simulate_bankroll_management(
 ):
     """Симуляция управления банкроллом с различными стратегиями"""
     try:
+        logger.info(f"🏦 Запуск симуляции банкролла: стратегия={request.strategy}")
+        logger.info(
+            f"📊 Параметры: банкролл={request.initial_bankroll}, симуляций={request.num_simulations}, риск={request.risk_level}")
+
         with LotteryContext(request.lottery_type):
-            # Инициализация менеджера банкролла
+            df_history = data_manager.fetch_draws_from_db()
+
+            if len(df_history) < request.num_draws:
+                logger.warning(f"⚠️ Недостаточно данных: доступно {len(df_history)}, запрошено {request.num_draws}")
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Недостаточно данных. Доступно {len(df_history)} тиражей"
+                )
+
+            config = data_manager.get_current_config()
+            logger.info(f"🎯 Конфигурация лотереи: {config.get('name', 'Unknown')}")
+
+            # Инициализация банкролл менеджера (ИСПРАВЛЕННАЯ ВЕРСИЯ)
             bankroll_mgr = BankrollManager(
                 initial_bankroll=request.initial_bankroll,
-                min_bet=50,
-                max_bet=request.initial_bankroll * 0.1
+                ticket_cost=request.bet_size if hasattr(request, 'bet_size') else 100
             )
+            logger.info(f"💰 BankrollManager инициализирован: банкролл={request.initial_bankroll}, цена билета={request.bet_size}")
 
             # Выбор стратегии
             strategy = BettingStrategy[request.strategy.upper()]
@@ -465,8 +557,12 @@ async def simulate_bankroll_management(
                 "timestamp": datetime.utcnow().isoformat()
             }
 
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"❌ Ошибка симуляции стратегии: {e}")
+        logger.error(f"❌ Тип ошибки: {type(e).__name__}")
+        logger.error(f"❌ Трассировка: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Ошибка симуляции стратегии: {str(e)}")
 
 # Вспомогательные функции
 def _generate_strategy_combinations(strategy, count, df_history, config, db, user_id):
@@ -587,14 +683,15 @@ def _calculate_max_drawdown(bankroll_history):
     return max_drawdown
 
 def _get_strategy_recommendation(roi, win_rate, max_drawdown):
-    """Рекомендации по стратегии"""
-    if roi > 0 and max_drawdown < 30:
-        return "✅ Прибыльная стратегия с контролируемым риском"
-
-    elif win_rate > 10:
-        return "📊 Высокая частота выигрышей, но низкая прибыльность"
+    """Рекомендация по стратегии"""
+    if roi > 10 and win_rate > 20:
+        return "🟢 Хорошая стратегия с положительным ROI"
+    elif roi > 0:
+        return "🟡 Умеренная стратегия с небольшой прибылью"
+    elif roi > -20:
+        return "🟠 Убыточная стратегия, но приемлемые потери"
     else:
-        return "❌ Убыточная стратегия, требует пересмотра"
+        return "🔴 Высокий риск потерь, не рекомендуется"
 
 def _calculate_real_win_probabilities(df_history, config):
     """Расчёт реальных вероятностей на основе истории"""
@@ -681,64 +778,126 @@ def _assess_risk_level(scenarios, monte_carlo):
     else:
         return {"level": "LOW", "description": "Низкий риск"}
 
+
 def _test_generation_method(method, df_history, config, num_simulations):
     """Тестирование метода генерации"""
+    from backend.app.core import combination_generator
+    import numpy as np
+
     scores = []
     wins = 0
 
     for _ in range(num_simulations):
-        # Генерируем комбинацию методом
-        if method == "random":
-            combo = combination_generator.generate_random_combination()
-        elif method == "hot":
-            combo = combination_generator.generate_hot_combination(df_history.tail(50))
-        elif method == "cold":
-            combo = combination_generator.generate_cold_combination(df_history.tail(50))
-        elif method == "mixed":
-            combo = combination_generator.generate_mixed_combination(df_history.tail(50))
-        elif method == "ai":
-            combo = combination_generator.generate_ai_combination(df_history.tail(50))
-        else:  # pattern
-            combo = combination_generator.generate_pattern_based_combination(df_history.tail(50))
+        try:
+            # Генерируем комбинацию методом
+            if method == "random":
+                f1, f2 = combination_generator.generate_random_combination()
+                combo = {'field1': f1, 'field2': f2}
 
-        # Оцениваем комбинацию
-        score = _evaluate_combination_score(combo, df_history)
-        scores.append(score)
+            elif method == "hot":
+                generated = combination_generator.generate_pattern_based_combinations(
+                    df_history.tail(50), 1, 'hot'
+                )
+                if generated:
+                    f1, f2, desc = generated[0]
+                    combo = {'field1': f1, 'field2': f2}
+                else:
+                    f1, f2 = combination_generator.generate_random_combination()
+                    combo = {'field1': f1, 'field2': f2}
 
-        # Проверяем на случайном тираже
-        random_draw = df_history.sample(1).iloc[0]
-        win_check = _check_combination_win(
-            combo['field1'], combo['field2'],
-            random_draw['field1_numbers'], random_draw['field2_numbers'],
-            config
-        )
-        if win_check['won']:
-            wins += 1
+            elif method == "cold":
+                generated = combination_generator.generate_pattern_based_combinations(
+                    df_history.tail(50), 1, 'cold'
+                )
+                if generated:
+                    f1, f2, desc = generated[0]
+                    combo = {'field1': f1, 'field2': f2}
+                else:
+                    f1, f2 = combination_generator.generate_random_combination()
+                    combo = {'field1': f1, 'field2': f2}
+
+            elif method == "mixed":
+                generated = combination_generator.generate_pattern_based_combinations(
+                    df_history.tail(50), 1, 'balanced'
+                )
+                if generated:
+                    f1, f2, desc = generated[0]
+                    combo = {'field1': f1, 'field2': f2}
+                else:
+                    f1, f2 = combination_generator.generate_random_combination()
+                    combo = {'field1': f1, 'field2': f2}
+
+            elif method == "ai":
+                generated = combination_generator.generate_rf_ranked_combinations(
+                    df_history.tail(50), 1
+                )
+                if generated:
+                    f1, f2, desc = generated[0]
+                    combo = {'field1': f1, 'field2': f2}
+                else:
+                    f1, f2 = combination_generator.generate_random_combination()
+                    combo = {'field1': f1, 'field2': f2}
+
+            else:  # pattern или другие
+                f1, f2 = combination_generator.generate_random_combination()
+                combo = {'field1': f1, 'field2': f2}
+
+            # Оцениваем комбинацию
+            score = _evaluate_combination_score(combo, df_history)
+            scores.append(score)
+
+            # Проверяем на случайном тираже
+            if not df_history.empty:
+                random_draw = df_history.sample(1).iloc[0]
+
+                # Извлекаем числа из тиража правильно
+                draw_f1 = random_draw.get('field1_numbers', random_draw.get('Числа_Поле1_list', []))
+                draw_f2 = random_draw.get('field2_numbers', random_draw.get('Числа_Поле2_list', []))
+
+                if isinstance(draw_f1, list) and isinstance(draw_f2, list):
+                    win_check = _check_combination_win(
+                        combo['field1'], combo['field2'],
+                        draw_f1, draw_f2,
+                        config
+                    )
+                    if win_check.get('won', False):
+                        wins += 1
+
+        except Exception as e:
+            logger.warning(f"Ошибка тестирования метода {method}: {e}")
+            scores.append(50)  # Средний скор при ошибке
+
+    avg_score = round(np.mean(scores) if scores else 50, 2)
+    win_rate = round((wins / num_simulations) * 100, 2) if num_simulations > 0 else 0
+    roi = round((wins * 500 - num_simulations * 100) / (num_simulations * 100) * 100,
+                2) if num_simulations > 0 else -100
 
     return {
-        "avg_score": np.mean(scores),
-        "win_rate": (wins / num_simulations) * 100,
-        "roi": (wins * 500 - num_simulations * 100) / (num_simulations * 100) * 100,
-        "consistency": 100 - np.std(scores),
-        "pros": _get_method_pros(method),
-        "cons": _get_method_cons(method)
+        "method": method,
+        "avg_score": avg_score,
+        "win_rate": win_rate,
+        "roi": roi,
+        "complexity": _get_method_complexity(method),
+        "consistency": max(0, 100 - (np.std(scores) if scores else 50)),
+        "pros": _get_method_pros(method),  # ДОБАВИТЬ
+        "cons": _get_method_cons(method)  # ДОБАВИТЬ
     }
 
-def _evaluate_combination_score(combo, df_history):
-    """Оценка качества комбинации"""
-    score = 50  # Базовый скор
-
-    # Анализ горячих/холодных чисел
-    hot_cold = pattern_analyzer.GLOBAL_PATTERN_ANALYZER.analyze_hot_cold_numbers(
-        df_history.tail(20), window_sizes=[20], top_n=10
-    )
-
-    # Добавляем баллы за горячие числа
-    hot_numbers = hot_cold.get('field1_window_20', {}).get('hot_numbers', [])
-    hot_count = len(set(combo['field1']) & set(hot_numbers))
-    score += hot_count * 5
-
-    return min(100, score)
+# def _evaluate_combination_score(combo, df_history):
+#     """Оценка качества комбинации"""
+#     score = 50  # Базовый скор
+#
+#     # Анализ горячих/холодных чисел
+#     hot_cold = pattern_analyzer.GLOBAL_PATTERN_ANALYZER.analyze_hot_cold_numbers(
+#         df_history.tail(20), window_sizes=[20], top_n=10
+#     )
+#
+#     # Добавляем баллы за горячие числа
+#     hot_numbers = hot_cold.get('field1_window_20', {}).get('hot_numbers', [])
+#     hot_count = len(set(combo['field1']) & set(hot_numbers))
+#     score += hot_count * 5
+#
+#     return min(100, score)
 
 def _get_method_complexity(method):
     """Определение сложности метода"""
@@ -822,3 +981,36 @@ def _suggest_optimal_settings(initial_bankroll, survival_rate, profitability_rat
         "suggested_stop_loss": round(initial_bankroll * 0.3, 2),
         "suggested_take_profit": round(initial_bankroll * 1.5, 2)
     }
+
+
+def _evaluate_combination_score(combo, df_history):
+    """Оценка качества комбинации"""
+    if df_history.empty:
+        return 50
+
+    try:
+        from backend.app.core import pattern_analyzer
+
+        score = 50  # Базовый скор
+
+        # Анализ горячих/холодных чисел
+        hot_cold = pattern_analyzer.GLOBAL_PATTERN_ANALYZER.analyze_hot_cold_numbers(
+            df_history.tail(20), window_sizes=[20], top_n=10
+        )
+
+        # Добавляем баллы за горячие числа
+        if 'field1_window20' in hot_cold:
+            hot_numbers_f1 = [item[0] for item in hot_cold['field1_window20'].get('hot_numbers', [])]
+            hot_count_f1 = len(set(combo['field1']) & set(hot_numbers_f1))
+            score += hot_count_f1 * 5
+
+        if 'field2_window20' in hot_cold:
+            hot_numbers_f2 = [item[0] for item in hot_cold['field2_window20'].get('hot_numbers', [])]
+            hot_count_f2 = len(set(combo['field2']) & set(hot_numbers_f2))
+            score += hot_count_f2 * 3
+
+        return min(100, max(0, score))
+
+    except Exception as e:
+        logger.warning(f"Ошибка при оценке комбинации: {e}")
+        return 50

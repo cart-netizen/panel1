@@ -17,7 +17,13 @@ class BankrollManager:
 
   def __init__(self, initial_bankroll=500000, ticket_cost=250):
     self.initial_bankroll = initial_bankroll
+    self.current_bankroll = initial_bankroll  # ДОБАВИТЬ ЭТУ СТРОКУ
     self.ticket_cost = ticket_cost
+
+  def update_bankroll(self, amount):
+    """Обновляет текущий банкролл"""
+    self.current_bankroll += amount
+    return self.current_bankroll
 
   def calculate_kelly_criterion(self, win_probability, average_payout):
     """
@@ -326,25 +332,55 @@ class BankrollManager:
         Размер ставки
     """
     if win_probability <= 0 or win_probability >= 1:
-      return self.min_bet
+      return self.ticket_cost
 
-    # Формула Келли: f = (bp - q) / b
-    # где b = odds - 1, p = win_probability, q = 1 - p
+      # Формула Келли: f = (bp - q) / b
     b = odds - 1
     p = win_probability
     q = 1 - p
 
     kelly_fraction = (b * p - q) / b if b > 0 else 0
-
-    # Применяем долю для безопасности
     kelly_fraction = kelly_fraction * fraction
 
-    # Ограничиваем размер ставки
     if kelly_fraction <= 0:
-      return self.min_bet
+      return self.ticket_cost
 
     bet_size = self.current_bankroll * kelly_fraction
-    return max(self.min_bet, min(bet_size, self.max_bet))
+    return max(self.ticket_cost, min(bet_size, self.current_bankroll * 0.1))
+
+
+  def calculate_bet_size(self, strategy, win_probability=0.05, odds=100, current_streak=0):
+    """Расчёт размера ставки в зависимости от стратегии"""
+    from enum import Enum
+
+    # Если strategy это строка, преобразуем в enum
+    if isinstance(strategy, str):
+      strategy_map = {
+        'FIXED': 'fixed',
+        'KELLY': 'kelly',
+        'PERCENTAGE': 'percentage',
+        'MARTINGALE': 'martingale',
+        'FIBONACCI': 'fibonacci'
+      }
+      strategy_str = strategy_map.get(strategy, strategy.lower())
+    else:
+      strategy_str = strategy.value.lower() if hasattr(strategy, 'value') else str(strategy).lower()
+
+    if strategy_str == 'kelly':
+      return self.calculate_kelly_bet(win_probability, odds)
+    elif strategy_str == 'percentage':
+      return self.current_bankroll * 0.02  # 2% от банкролла
+    elif strategy_str == 'martingale':
+      base_bet = self.ticket_cost
+      bet = base_bet * (2 ** current_streak)
+      return min(bet, self.current_bankroll * 0.5)
+    elif strategy_str == 'fibonacci':
+      fib_sequence = [1, 1, 2, 3, 5, 8, 13, 21, 34, 55]
+      fib_index = min(current_streak, len(fib_sequence) - 1)
+      bet = self.ticket_cost * fib_sequence[fib_index]
+      return min(bet, self.current_bankroll * 0.3)
+    else:  # fixed
+      return self.ticket_cost
 
 # Глобальный экземпляр менеджера банкролла
 GLOBAL_BANKROLL_MANAGER = BankrollManager()
