@@ -72,7 +72,7 @@ async def generate_combinations_async(
           user_id=current_user.id if current_user else None,
           lottery_type=lottery_type,
           combination_count=len(combinations_response),
-          method=params.method
+          method=params.generator_type
         )
       except Exception as e:
         logger.error(f"Ошибка логирования активности: {e}")
