@@ -41,6 +41,7 @@ class CombinationEvaluationRequest(BaseModel):
     field2: List[int]
     use_favorites: bool = False
 
+
 @router.post("/patterns")
 async def analyze_patterns(
     request: PatternAnalysisRequest,
@@ -49,18 +50,26 @@ async def analyze_patterns(
 ):
     """Детальный анализ паттернов выпадения"""
     try:
+        print(f"🔍 Начинаем анализ паттернов для {request.lottery_type}")
+
         with LotteryContext(request.lottery_type):
             # Загружаем историю
             df_history = data_manager.fetch_draws_from_db()
+            print(f"📊 Загружено {len(df_history)} тиражей")
 
             if df_history.empty:
                 raise HTTPException(status_code=404, detail="Нет данных для анализа. Попробуйте обновить базу данных.")
 
-            # Используем упрощенный анализ
-            hot_cold_analysis = _analyze_hot_cold_simple(df_history.tail(request.depth))
+            # Используем упрощенный анализ вместо GLOBAL_PATTERN_ANALYZER
+            df_analysis = df_history.tail(request.depth)
+            print(f"🔬 Анализируем последние {len(df_analysis)} тиражей")
+
+            hot_cold_analysis = _analyze_hot_cold_simple(df_analysis)
+            print("✅ Анализ горячих/холодных чисел завершен")
 
             # Анализ корреляций (упрощенный)
-            correlations = _analyze_correlations_simple(df_history.tail(request.depth))
+            correlations = _analyze_correlations_simple(df_analysis)
+            print("✅ Анализ корреляций завершен")
 
             # Анализ избранных чисел (если включен)
             favorites_analysis = None
@@ -71,10 +80,11 @@ async def analyze_patterns(
                     lottery_favorites = all_favorites.get(request.lottery_type, {"field1": [], "field2": []})
                     if lottery_favorites['field1'] or lottery_favorites['field2']:
                         favorites_analysis = _analyze_favorite_numbers(
-                            df_history,
+                            df_analysis,
                             lottery_favorites['field1'],
                             lottery_favorites['field2']
                         )
+                        print("✅ Анализ избранных чисел завершен")
 
             # Формируем результат
             result = {
@@ -93,13 +103,13 @@ async def analyze_patterns(
                 },
                 "timestamp": datetime.utcnow().isoformat()
             }
-            print("🔍 Отправляем результат анализа паттернов:", result)
 
+            print("🔍 Отправляем результат анализа паттернов:", result)
             return result
 
     except Exception as e:
         import traceback
-        print(f"Ошибка анализа паттернов: {e}")
+        print(f"❌ Ошибка анализа паттернов: {e}")
         print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Ошибка анализа: {str(e)}")
 
@@ -156,6 +166,7 @@ def _analyze_correlations_simple(df_history, top_n=5):
 
     return correlations
 
+
 @router.post("/clusters")
 async def analyze_clusters(
     request: ClusterAnalysisRequest,
@@ -164,8 +175,11 @@ async def analyze_clusters(
 ):
     """Кластерный анализ чисел на основе частот и паттернов"""
     try:
+        print(f"🔍 Начинаем кластерный анализ для {request.lottery_type}")
+
         with LotteryContext(request.lottery_type):
             df_history = data_manager.fetch_draws_from_db()
+            print(f"📊 Загружено {len(df_history)} тиражей")
 
             if df_history.empty:
                 raise HTTPException(status_code=404, detail="Нет данных для анализа")
@@ -173,13 +187,15 @@ async def analyze_clusters(
             # Подготовка данных для кластеризации
             config = data_manager.get_current_config()
 
-            # Создаём матрицу признаков для каждого числа
-            features_f1 = _prepare_clustering_features(
-                df_history, 'field1_numbers', config['field1_max']
+            # ИСПРАВЛЕНИЕ: Передаем правильные названия полей
+            features_f1 = _prepare_clustering_features_fixed(
+                df_history, 'field1', config['field1_max']
             )
-            features_f2 = _prepare_clustering_features(
-                df_history, 'field2_numbers', config['field2_max']
+            features_f2 = _prepare_clustering_features_fixed(
+                df_history, 'field2', config['field2_max']
             )
+
+            print(f"✅ Подготовлены признаки: поле1={len(features_f1)}, поле2={len(features_f2)}")
 
             # Выполняем кластеризацию
             if request.method == "kmeans":
@@ -191,12 +207,14 @@ async def analyze_clusters(
             else:
                 raise HTTPException(status_code=400, detail="Неподдерживаемый метод кластеризации")
 
+            print(f"✅ Кластеризация завершена методом {request.method}")
+
             # Интерпретация кластеров
-            cluster_interpretation = _interpret_clusters(
+            cluster_interpretation = _interpret_clusters_fixed(
                 clusters_f1, clusters_f2, df_history
             )
 
-            return {
+            result = {
                 "status": "success",
                 "clusters": {
                     "field1": clusters_f1,
@@ -211,9 +229,12 @@ async def analyze_clusters(
                 "timestamp": datetime.utcnow().isoformat()
             }
 
+            print("🔍 Отправляем результат кластерного анализа")
+            return result
+
     except Exception as e:
         import traceback
-        print(f"Ошибка кластерного анализа: {e}")
+        print(f"❌ Ошибка кластерного анализа: {e}")
         print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Ошибка кластеризации: {str(e)}")
 
@@ -592,3 +613,86 @@ def _count_sequences(numbers):
             sequences += 1
 
     return sequences
+
+
+def _prepare_clustering_features_fixed(df, field_name, max_num):
+    """Исправленная подготовка признаков для кластеризации"""
+    features = {}
+
+    # ИСПРАВЛЕНИЕ: Правильные названия колонок
+    column_name = 'Числа_Поле1_list' if field_name == 'field1' else 'Числа_Поле2_list'
+
+    print(f"🔧 Подготавливаем признаки для {field_name}, колонка: {column_name}")
+
+    for num in range(1, max_num + 1):
+        try:
+            # Частота появления
+            frequency = sum(num in row for row in df[column_name])
+
+            # Среднее расстояние между появлениями
+            appearances = [i for i, row in enumerate(df[column_name]) if num in row]
+            avg_gap = np.mean(np.diff(appearances)) if len(appearances) > 1 else len(df)
+
+            # Тренд (появления в последних 20% тиражей)
+            recent_df = df.tail(max(1, len(df) // 5))
+            recent_freq = sum(num in row for row in recent_df[column_name])
+
+            features[num] = [frequency, avg_gap, recent_freq]
+        except Exception as e:
+            print(f"⚠️ Ошибка обработки числа {num}: {e}")
+            features[num] = [0, len(df), 0]  # Дефолтные значения
+
+    return features
+
+
+def _interpret_clusters_fixed(clusters_f1, clusters_f2, df_history):
+    """Исправленная интерпретация кластеров"""
+    interpretation = {}
+
+    # Группировка по кластерам для обоих полей
+    for field_name, clusters in [("field1", clusters_f1), ("field2", clusters_f2)]:
+        cluster_groups = {}
+        for num, cluster_id in clusters.items():
+            if cluster_id not in cluster_groups:
+                cluster_groups[cluster_id] = []
+            cluster_groups[cluster_id].append(num)
+
+        # ИСПРАВЛЕНИЕ: Правильные названия колонок
+        column_name = 'Числа_Поле1_list' if field_name == 'field1' else 'Числа_Поле2_list'
+
+        # Интерпретация каждого кластера
+        for cluster_id, numbers in cluster_groups.items():
+            try:
+                if cluster_id == -1:  # DBSCAN outliers
+                    interpretation[f"{field_name}_outliers"] = {
+                        "numbers": numbers,
+                        "description": "Аномальные числа с уникальными паттернами"
+                    }
+                else:
+                    # Анализ характеристик кластера
+                    avg_frequency = np.mean([
+                        sum(num in row for row in df_history[column_name])
+                        for num in numbers
+                    ])
+
+                    if avg_frequency > len(df_history) * 0.15:
+                        desc = "Горячий кластер - числа с высокой частотой"
+                    elif avg_frequency < len(df_history) * 0.05:
+                        desc = "Холодный кластер - редко выпадающие числа"
+                    else:
+                        desc = "Нейтральный кластер - средняя активность"
+
+                    interpretation[f"{field_name}_cluster_{cluster_id}"] = {
+                        "numbers": numbers,
+                        "description": desc,
+                        "avg_frequency": round(avg_frequency, 2)
+                    }
+            except Exception as e:
+                print(f"⚠️ Ошибка интерпретации кластера {cluster_id}: {e}")
+                interpretation[f"{field_name}_cluster_{cluster_id}"] = {
+                    "numbers": numbers,
+                    "description": "Ошибка анализа кластера",
+                    "avg_frequency": 0
+                }
+
+    return interpretation
