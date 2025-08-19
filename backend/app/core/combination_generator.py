@@ -7,6 +7,197 @@ from backend.app.core.ai_model import GLOBAL_RF_MODEL  # Using the global RF mod
 from backend.app.core.pattern_analyzer import GLOBAL_PATTERN_ANALYZER
 from backend.app.core.data_manager import get_current_config
 
+from backend.app.core.xgboost_model import GLOBAL_XGBOOST_MANAGER
+
+
+def generate_xgboost_ranked_combinations(df_history, num_to_generate, num_candidates=100):
+  """
+  Генерация комбинаций с использованием XGBoost ранжирования
+  Превосходит RF по точности и скорости
+
+  Args:
+      df_history: История тиражей
+      num_to_generate: Количество комбинаций для генерации
+      num_candidates: Количество кандидатов для оценки
+
+  Returns:
+      Список кортежей (field1, field2, описание)
+  """
+  import time
+  from backend.app.core.data_manager import get_current_config, CURRENT_LOTTERY
+
+  if df_history.empty or len(df_history) < 10:
+    print("XGBoost Gen: Недостаточно данных. Генерация случайных.")
+    return [(r1, r2, "Случайная (мало данных)") for r1, r2 in
+            [generate_random_combination() for _ in range(num_to_generate)]]
+
+  print("🚀 XGBoost генерация с ML ранжированием...")
+  start_time = time.time()
+
+  # Получаем конфигурацию и модель
+  config = get_current_config()
+  xgb_model = GLOBAL_XGBOOST_MANAGER.get_model(CURRENT_LOTTERY, config)
+
+  # Проверяем обучена ли модель
+  if not xgb_model.is_trained:
+    print("🎓 XGBoost требует обучения...")
+    train_start = time.time()
+    success = xgb_model.train(df_history)
+
+    if not success:
+      print("❌ XGBoost обучение не удалось, используем RF fallback")
+      return generate_rf_ranked_combinations(df_history, num_to_generate)
+
+    print(f"✅ XGBoost обучен за {time.time() - train_start:.2f}с")
+
+  # Генерируем кандидатов
+  candidates = []
+
+  # 1. XGBoost предсказание
+  last_draw = df_history.iloc[0]
+  last_f1 = last_draw.get('Числа_Поле1_list', [])
+  last_f2 = last_draw.get('Числа_Поле2_list', [])
+
+  if isinstance(last_f1, list) and isinstance(last_f2, list):
+    pred_f1, pred_f2 = xgb_model.predict_next_combination(last_f1, last_f2, df_history)
+    if pred_f1 and pred_f2:
+      candidates.append((pred_f1, pred_f2))
+
+  # 2. Умные комбинации на основе паттернов
+  from backend.app.core.trend_analyzer import GLOBAL_TREND_ANALYZER
+
+  try:
+    trends = GLOBAL_TREND_ANALYZER.analyze_current_trends(df_history)
+
+    # Генерация на основе трендов
+    for field_name, trend_data in trends.items():
+      if field_name == 'field1':
+        # Комбинация горячих чисел с ускорением
+        if trend_data.hot_acceleration:
+          f1_hot = trend_data.hot_acceleration[:config['field1_size']]
+          # Дополняем случайными если не хватает
+          while len(f1_hot) < config['field1_size']:
+            num = random.randint(1, config['field1_max'])
+            if num not in f1_hot:
+              f1_hot.append(num)
+
+          f2_random = random.sample(range(1, config['field2_max'] + 1), config['field2_size'])
+          candidates.append((sorted(f1_hot[:config['field1_size']]), sorted(f2_random)))
+
+        # Комбинация холодных готовых к развороту
+        if trend_data.cold_reversal:
+          f1_cold = trend_data.cold_reversal[:config['field1_size']]
+          while len(f1_cold) < config['field1_size']:
+            num = random.randint(1, config['field1_max'])
+            if num not in f1_cold:
+              f1_cold.append(num)
+
+          f2_random = random.sample(range(1, config['field2_max'] + 1), config['field2_size'])
+          candidates.append((sorted(f1_cold[:config['field1_size']]), sorted(f2_random)))
+
+  except Exception as e:
+    print(f"Ошибка анализа трендов: {e}")
+
+  # 3. Генерация дополнительных умных кандидатов
+  hot_f1, cold_f1 = analyze_hot_cold_numbers(df_history, 1)
+  hot_f2, cold_f2 = analyze_hot_cold_numbers(df_history, 2)
+
+  # Различные стратегии
+  strategies = [
+    ('hot', hot_f1[:10], hot_f2[:10]),
+    ('cold', cold_f1[:10], cold_f2[:10]),
+    ('mixed', hot_f1[:5] + cold_f1[:5], hot_f2[:5] + cold_f2[:5])
+  ]
+
+  for strategy_name, pool_f1, pool_f2 in strategies:
+    for _ in range(num_candidates // 3):
+      if len(pool_f1) >= config['field1_size'] and len(pool_f2) >= config['field2_size']:
+        f1 = sorted(random.sample(pool_f1, config['field1_size']))
+        f2 = sorted(random.sample(pool_f2, config['field2_size']))
+        candidates.append((f1, f2))
+
+  # 4. Дополняем случайными для разнообразия
+  while len(candidates) < num_candidates:
+    f1, f2 = generate_random_combination()
+    candidates.append((f1, f2))
+
+  # Убираем дубликаты
+  unique_candidates = []
+  seen = set()
+  for f1, f2 in candidates:
+    key = (tuple(f1), tuple(f2))
+    if key not in seen:
+      seen.add(key)
+      unique_candidates.append((f1, f2))
+
+  # Оцениваем все кандидаты через XGBoost
+  print(f"⚡ Оценка {len(unique_candidates)} кандидатов через XGBoost...")
+  scored_combinations = []
+
+  for f1, f2 in unique_candidates:
+    score = xgb_model.score_combination(f1, f2, df_history)
+    scored_combinations.append((f1, f2, score))
+
+  # Сортируем по оценке
+  scored_combinations.sort(key=lambda x: x[2], reverse=True)
+
+  # Берем топ комбинации
+  results = []
+  for i, (f1, f2, score) in enumerate(scored_combinations[:num_to_generate]):
+    # Получаем SHAP важность для первой комбинации
+    importance_info = ""
+    if i == 0:
+      try:
+        shap_data = xgb_model.get_shap_explanation(f1, f2, df_history)
+        if 'top_important_features' in shap_data and shap_data['top_important_features']:
+          top_feature = shap_data['top_important_features'][0]
+          importance_info = f" [{top_feature['name']}]"
+      except:
+        pass
+
+    desc = f"XGBoost #{i + 1} (score: {score:.1f}){importance_info}"
+    results.append((f1, f2, desc))
+
+  elapsed = time.time() - start_time
+  print(f"✅ XGBoost генерация завершена за {elapsed:.2f}с")
+
+  # Получаем метрики
+  metrics = xgb_model.get_metrics()
+  if metrics.get('roc_auc'):
+    avg_auc = sum(metrics['roc_auc']) / len(metrics['roc_auc'])
+    print(f"📊 XGBoost ROC-AUC: {avg_auc:.3f}, Cache hit: {metrics.get('cache_hit_rate', 0):.1f}%")
+
+  return results
+
+
+def generate_xgboost_prediction(df_history):
+  """
+  Получить чистое XGBoost предсказание
+
+  Returns:
+      Tuple (field1, field2) или (None, None)
+  """
+  from backend.app.core.data_manager import get_current_config, CURRENT_LOTTERY
+
+  if df_history.empty or len(df_history) < 10:
+    return None, None
+
+  config = get_current_config()
+  xgb_model = GLOBAL_XGBOOST_MANAGER.get_model(CURRENT_LOTTERY, config)
+
+  if not xgb_model.is_trained:
+    success = xgb_model.train(df_history)
+    if not success:
+      return None, None
+
+  last_draw = df_history.iloc[0]
+  last_f1 = last_draw.get('Числа_Поле1_list', [])
+  last_f2 = last_draw.get('Числа_Поле2_list', [])
+
+  if isinstance(last_f1, list) and isinstance(last_f2, list):
+    return xgb_model.predict_next_combination(last_f1, last_f2, df_history)
+
+  return None, None
 
 def generate_random_combination():
   """

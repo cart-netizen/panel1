@@ -5,7 +5,7 @@ from datetime import datetime
 # --- Модели для генерации (без изменений) ---
 
 class GenerationParams(BaseModel):
-    generator_type: Literal['multi_strategy', 'ml_based_rf', 'hot', 'cold', 'balanced', 'rf_ranked'] = Field(
+    generator_type: Literal['multi_strategy', 'ml_based_rf', 'hot', 'cold', 'balanced', 'rf_ranked','xgboost_ranked'] = Field(
         'multi_strategy',
         description="Тип генератора для использования"
     )

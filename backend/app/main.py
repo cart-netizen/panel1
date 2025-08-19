@@ -14,6 +14,9 @@ from backend.app.core.lottery_context import LotteryContext
 from backend.app.core.cache_manager import CACHE_MANAGER, logger
 from backend.app.api import user_preferences
 from backend.app.api import analysis_tools, simulation_tools
+from backend.app.api import xgboost_api_endpoints
+from backend.app.api import validation_routes
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -111,6 +114,35 @@ async def lifespan(app: FastAPI):
             else:
               print(f"   [FAIL] Модели не обучены для {lottery_type}")
 
+            # 4. Обучение XGBoost моделей
+            try:
+              print(f"   [AI] Обучение XGBoost моделей для {lottery_type}...")
+
+              from backend.app.core.xgboost_model import GLOBAL_XGBOOST_MANAGER
+
+              # Получаем XGBoost модель
+              xgb_model = GLOBAL_XGBOOST_MANAGER.get_model(lottery_type, config)
+
+              # Обучаем XGBoost
+              xgb_trained = xgb_model.train(df)
+
+              if xgb_trained:
+                lottery_stats['xgboost_trained'] = True
+                print(f"   [OK] XGBoost модель обучена для {lottery_type}")
+
+                # Получаем метрики
+                xgb_metrics = xgb_model.get_metrics()
+                if xgb_metrics.get('roc_auc'):
+                  avg_auc = sum(xgb_metrics['roc_auc']) / len(xgb_metrics['roc_auc'])
+                  print(f"   [XGB] Средний ROC-AUC: {avg_auc:.3f}")
+              else:
+                print(f"   [WARN] XGBoost модель не обучена для {lottery_type}")
+
+            except Exception as e:
+              print(f"   [WARN] Ошибка обучения XGBoost для {lottery_type}: {e}")
+              lottery_stats['xgboost_error'] = str(e)
+
+
           except Exception as e:
             print(f"   [FAIL] Ошибка обучения моделей для {lottery_type}: {e}")
             lottery_stats['error'] = str(e)
@@ -138,6 +170,14 @@ async def lifespan(app: FastAPI):
 
   if initialization_stats['successful_lotteries'] > 0:
     print(f"\n[SUCCESS] Приложение готово к работе!")
+    # Статистика XGBoost
+    xgb_stats = GLOBAL_XGBOOST_MANAGER.get_all_metrics()
+    if xgb_stats:
+      print(f"\n[XGBOOST] Статистика моделей:")
+      for lottery_type, metrics in xgb_stats.items():
+        if metrics.get('roc_auc'):
+          avg_auc = sum(metrics['roc_auc']) / len(metrics['roc_auc'])
+          print(f"   {lottery_type}: ROC-AUC={avg_auc:.3f}, время обучения={metrics.get('training_time', 0):.1f}с")
     print(f"   Доступно лотерей: {initialization_stats['successful_lotteries']}")
   else:
     print(f"\n[WARN]  Приложение запущено, но лотереи могут работать некорректно!")
@@ -289,6 +329,9 @@ app.include_router(
     prefix="/api/v1/simulation",
     tags=["simulation"]
 )
+app.include_router(xgboost_api_endpoints.router, prefix="/api/v1/{lottery_type}", tags=["XGBoost"])
+app.include_router(validation_routes.router, prefix="/api/v1/{lottery_type}", tags=["Validation"])
+
 @app.get("/", summary="Корневой эндпоинт")
 def read_root():
   return {"message": "Welcome to the Lottery Analysis API. Visit /docs for documentation."}

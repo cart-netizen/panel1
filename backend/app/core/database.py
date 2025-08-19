@@ -306,3 +306,28 @@ def get_db_stats():
       stats['users'] = []
 
     return stats
+
+class ValidationResult(Base):
+    """Результаты walk-forward валидации"""
+    __tablename__ = "validation_results"
+
+    id = Column(Integer, primary_key=True, index=True)
+    task_id = Column(String(255), unique=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    lottery_type = Column(String(20), nullable=False)
+    model_name = Column(String(50), nullable=False)
+
+    # Метрики
+    avg_accuracy = Column(Float)
+    avg_f1 = Column(Float)
+    avg_roc_auc = Column(Float, nullable=True)
+    total_windows = Column(Integer)
+
+    # Результаты
+    full_results = Column(JSON)  # Полные результаты валидации
+
+    # Временные метки
+    started_at = Column(DateTime, nullable=False)
+    completed_at = Column(DateTime, nullable=True)
+    status = Column(String(20), default='running')  # running, completed, error
+    error_message = Column(Text, nullable=True)

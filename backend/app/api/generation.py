@@ -193,7 +193,8 @@ def generate_combinations(params: GenerationParams, context: None = Depends(set_
   strategy_map = {
     'multi_strategy': combination_generator.generate_multi_strategy_combinations,
     'ml_based_rf': combination_generator.generate_ml_based_combinations,
-    'rf_ranked': combination_generator.generate_rf_ranked_combinations
+    'rf_ranked': combination_generator.generate_rf_ranked_combinations,
+    'xgboost_ranked': combination_generator.generate_xgboost_ranked_combinations,
   }
   pattern_map = {
     'hot': lambda df, n: combination_generator.generate_pattern_based_combinations(df, n, 'hot'),
