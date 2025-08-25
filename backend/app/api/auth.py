@@ -4,7 +4,9 @@ API эндпоинты для аутентификации
 from datetime import timedelta
 
 from fastapi.security import OAuth2PasswordRequestForm
+from sqlalchemy.orm import Session
 
+from backend.app.core.database import get_db
 from backend.app.core.auth import (
     authenticate_user, create_user, create_access_token,
     verify_token, get_user_by_email, ACCESS_TOKEN_EXPIRE_MINUTES,
@@ -62,76 +64,6 @@ def register_user(user_data: UserCreate):
             detail="Ошибка при создании пользователя"
         )
 
-# @router.post("/login-json", response_model=Token, summary="Вход через JSON")
-# def login_user_json(user_credentials: UserLogin):
-#     """
-#     Альтернативный вход через JSON (для frontend).
-#     """
-#     user = authenticate_user(user_credentials.email, user_credentials.password)
-#
-#     if not user:
-#         raise HTTPException(
-#             status_code=status.HTTP_401_UNAUTHORIZED,
-#             detail="Неверный email или пароль",
-#             headers={"WWW-Authenticate": "Bearer"},
-#         )
-#
-#     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-#     access_token = create_access_token(
-#         data={"sub": user.email}, expires_delta=access_token_expires
-#     )
-#
-#     return {"access_token": access_token, "token_type": "bearer"}
-
-
-# @router.post("/login", response_model=Token, summary="Вход в систему")
-# async def login_user(
-#     # Пытаемся принять оба формата
-#     form_data: OAuth2PasswordRequestForm = None,
-#     json_data: LoginRequest = None,
-#     email: str = Body(None),
-#     password: str = Body(None)
-# ):
-#     """
-#     Универсальный вход - поддерживает и OAuth2 форму (для Swagger) и JSON (для frontend)
-#     """
-#     # Определяем источник данных
-#     login_email = None
-#     login_password = None
-#
-#     if form_data:
-#         # OAuth2 форма (Swagger UI)
-#         login_email = form_data.username
-#         login_password = form_data.password
-#     elif email and password:
-#         # Прямые поля JSON
-#         login_email = email
-#         login_password = password
-#     else:
-#         # Пробуем распарсить как JSON body
-#         raise HTTPException(
-#             status_code=status.HTTP_400_BAD_REQUEST,
-#             detail="Требуются email и password"
-#         )
-#
-#     # Аутентификация
-#     user = authenticate_user(login_email, login_password)
-#
-#     if not user:
-#         raise HTTPException(
-#             status_code=status.HTTP_401_UNAUTHORIZED,
-#             detail="Неверный email или пароль",
-#             headers={"WWW-Authenticate": "Bearer"},
-#         )
-#
-#     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-#     access_token = create_access_token(
-#         data={"sub": user.email},
-#         expires_delta=access_token_expires
-#     )
-#
-#     return {"access_token": access_token, "token_type": "bearer"}
-
 @router.get("/me", response_model=UserResponse, summary="Информация о текущем пользователе")
 def get_current_user_info(current_user = Depends(get_current_user)):
     """
@@ -166,14 +98,13 @@ def verify_token(current_user = Depends(get_current_user)):
     return {"valid": True, "email": current_user.email}
 
 
-# @router.post("/login", response_model=Token, summary="Вход через OAuth2 форму (Swagger)")
-# def login_form(form_data: OAuth2PasswordRequestForm = Depends()):
+
+# @router.post("/login-json", response_model=Token, summary="Вход через JSON (Frontend)")
+# def login_json(credentials: JsonLoginRequest):
 #     """
-#     Аутентификация через OAuth2 форму для Swagger UI.
-#     Используйте email в поле username.
+#     Аутентификация через JSON для Frontend приложения.
 #     """
-#     # OAuth2PasswordRequestForm использует username, но мы принимаем email
-#     user = authenticate_user(form_data.username, form_data.password)
+#     user = authenticate_user(credentials.email, credentials.password)
 #
 #     if not user:
 #         raise HTTPException(
@@ -190,28 +121,40 @@ def verify_token(current_user = Depends(get_current_user)):
 #
 #     return {"access_token": access_token, "token_type": "bearer"}
 
-
-@router.post("/login-json", response_model=Token, summary="Вход через JSON (Frontend)")
-def login_json(credentials: JsonLoginRequest):
+@router.post("/login-json", response_model=Token, summary="Вход через JSON")
+def login_user_json(user_credentials: UserLogin):
     """
-    Аутентификация через JSON для Frontend приложения.
+    Альтернативный вход через JSON (для frontend).
     """
-    user = authenticate_user(credentials.email, credentials.password)
+    try:
+        user = authenticate_user(user_credentials.email, user_credentials.password)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Неверный email или пароль"
+            )
 
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Неверный email или пароль",
-            headers={"WWW-Authenticate": "Bearer"},
+        # Создаем токен доступа
+        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = create_access_token(
+            data={"sub": user.email},
+            expires_delta=access_token_expires
         )
 
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user.email},
-        expires_delta=access_token_expires
-    )
-
-    return {"access_token": access_token, "token_type": "bearer"}
+        return {
+            "access_token": access_token,
+            "token_type": "bearer"
+        }
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Ошибка входа в систему"
+        )
 
 
 @router.get("/verify-token", summary="Проверить валидность токена")
@@ -233,25 +176,132 @@ def logout(current_user = Depends(get_current_user)):
 
 
 @router.post("/login", response_model=Token, summary="Вход через OAuth2 (Swagger)")
-def login_oauth2(form_data: OAuth2PasswordRequestForm = Depends()):
+def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
     """
-    Аутентификация через OAuth2 форму для Swagger UI.
-    В поле username введите ваш email.
+    OAuth2 совместимый вход (form-data).
     """
-    # OAuth2PasswordRequestForm использует username, но мы ожидаем email
-    user = authenticate_user(form_data.username, form_data.password)
+    try:
+        user = authenticate_user(form_data.username, form_data.password)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Неверный email или пароль",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Неверный email или пароль",
-            headers={"WWW-Authenticate": "Bearer"},
+        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = create_access_token(
+            data={"sub": user.email}, expires_delta=access_token_expires
         )
 
-    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = create_access_token(
-        data={"sub": user.email},
-        expires_delta=access_token_expires
-    )
+        return {"access_token": access_token, "token_type": "bearer"}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Ошибка входа в систему"
+        )
+# def login_oauth2(form_data: OAuth2PasswordRequestForm = Depends()):
+#     """
+#     Аутентификация через OAuth2 форму для Swagger UI.
+#     В поле username введите ваш email.
+#     """
+#     # OAuth2PasswordRequestForm использует username, но мы ожидаем email
+#     user = authenticate_user(form_data.username, form_data.password)
+#
+#     if not user:
+#         raise HTTPException(
+#             status_code=status.HTTP_401_UNAUTHORIZED,
+#             detail="Неверный email или пароль",
+#             headers={"WWW-Authenticate": "Bearer"},
+#         )
+#
+#     access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+#     access_token = create_access_token(
+#         data={"sub": user.email},
+#         expires_delta=access_token_expires
+#     )
+#
+#     return {"access_token": access_token, "token_type": "bearer"}
 
-    return {"access_token": access_token, "token_type": "bearer"}
+
+@router.get("/debug-subscription", summary="🔍 ДИАГНОСТИКА подписки")
+def debug_subscription(current_user=Depends(get_current_user), db: Session = Depends(get_db)):
+    """
+    🔍 ДИАГНОСТИЧЕСКИЙ эндпоинт для проверки состояния подписки
+
+    Показывает ВСЕ источники информации о подписке пользователя
+    """
+    from backend.app.core.database import UserPreferences
+    import json
+
+    result = {
+        "user_id": current_user.id,
+        "email": current_user.email,
+
+        # Данные из таблицы User
+        "user_table": {
+            "subscription_status": current_user.subscription_status,
+            "subscription_plan": current_user.subscription_plan,
+            "subscription_expires_at": current_user.subscription_expires_at.isoformat() if current_user.subscription_expires_at else None,
+        },
+
+        # Данные из UserPreferences
+        "user_preferences": {
+            "exists": False,
+            "preferred_strategies_raw": None,
+            "preferred_strategies_parsed": None,
+            "subscription_plan_from_json": None,
+            "parsing_error": None
+        }
+    }
+
+    # Проверяем UserPreferences
+    user_prefs = db.query(UserPreferences).filter_by(user_id=current_user.id).first()
+    if user_prefs:
+        result["user_preferences"]["exists"] = True
+        result["user_preferences"]["preferred_strategies_raw"] = user_prefs.preferred_strategies
+
+        if user_prefs.preferred_strategies:
+            try:
+                strategies = json.loads(user_prefs.preferred_strategies)
+                result["user_preferences"]["preferred_strategies_parsed"] = strategies
+
+                if isinstance(strategies, dict):
+                    result["user_preferences"]["subscription_plan_from_json"] = strategies.get('subscription_plan')
+
+            except Exception as e:
+                result["user_preferences"]["parsing_error"] = str(e)
+
+    # Диагностика логики доступа
+    from backend.app.core.subscription_protection import SubscriptionLevel
+
+    result["access_check"] = {}
+    for level_name, level_enum in [
+        ("FREE", SubscriptionLevel.FREE),
+        ("BASIC", SubscriptionLevel.BASIC),
+        ("PREMIUM", SubscriptionLevel.PREMIUM),
+        ("PRO", SubscriptionLevel.PRO)
+    ]:
+        try:
+            from backend.app.core.subscription_protection import check_subscription_access
+            has_access = check_subscription_access(current_user.id, level_enum, db)
+            result["access_check"][level_name] = has_access
+        except Exception as e:
+            result["access_check"][level_name] = f"ERROR: {str(e)}"
+
+    # Рекомендации
+    recommendations = []
+
+    if result["user_table"]["subscription_plan"] and result["user_table"]["subscription_status"] == "active":
+        recommendations.append(f"✅ У вас {result['user_table']['subscription_plan']} подписка в основной таблице")
+    else:
+        recommendations.append("❌ Нет активной подписки в основной таблице User")
+
+    if result["user_preferences"]["subscription_plan_from_json"]:
+        recommendations.append(f"✅ У вас {result['user_preferences']['subscription_plan_from_json']} в UserPreferences")
+    else:
+        recommendations.append("❌ Нет подписки в UserPreferences")
+
+    result["recommendations"] = recommendations
+
+    return result

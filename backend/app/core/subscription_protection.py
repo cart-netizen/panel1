@@ -127,6 +127,7 @@ from functools import wraps
 from fastapi import HTTPException, status, Depends
 from sqlalchemy.orm import Session
 from backend.app.core.database import get_db, User, UserPreferences
+
 from backend.app.core.auth import get_current_user
 from enum import Enum
 import logging
@@ -143,30 +144,59 @@ class SubscriptionLevel(Enum):
 
 def check_subscription_access(user_id: int, required_level: SubscriptionLevel, db: Session) -> bool:
   """
-  Проверяет доступ пользователя на основе уровня подписки
-  Использует отдельный запрос для получения preferences
+  ИСПРАВЛЕНО: Проверяет доступ пользователя с учетом ОБОИХ источников подписки
+  1. Сначала User.subscription_plan (основной источник)
+  2. Потом UserPreferences.preferred_strategies (fallback)
   """
+  print(f"🔍 Проверяем подписку для user_id={user_id}, требуется={required_level.value}")
+
   if required_level == SubscriptionLevel.FREE:
     return True
 
-  # Загружаем preferences отдельным запросом
-  user_prefs = db.query(UserPreferences).filter_by(user_id=user_id).first()
+  # ИСПРАВЛЕНИЕ: Сначала проверяем основную таблицу User
+  user = db.query(User).filter(User.id == user_id).first()
+  user_plan = None
 
-  # Если нет preferences - считаем как базовый уровень
-  if not user_prefs:
-    user_plan = "basic"
-  else:
-    # Получаем план из preferences (это уже JSON поле)
-    import json
-    try:
-      if user_prefs.preferred_strategies:  # Используем другое поле для хранения плана
+  if user:
+    print(f"📊 User найден: subscription_status={user.subscription_status}, subscription_plan={user.subscription_plan}")
+
+    # Проверяем основные поля User
+    if user.subscription_status == "active" and user.subscription_plan:
+      user_plan = user.subscription_plan
+      print(f"✅ Используем User.subscription_plan: {user_plan}")
+    else:
+      print(f"⚠️ User.subscription_plan не подходит: status={user.subscription_status}, plan={user.subscription_plan}")
+
+  # Fallback: Если нет в основной таблице, проверяем UserPreferences
+  if not user_plan:
+    print(f"🔄 Fallback: Проверяем UserPreferences...")
+    user_prefs = db.query(UserPreferences).filter_by(user_id=user_id).first()
+
+    if user_prefs and user_prefs.preferred_strategies:
+      import json
+      try:
         strategies = json.loads(user_prefs.preferred_strategies)
-        user_plan = strategies.get('subscription_plan', 'basic') if isinstance(strategies, dict) else 'basic'
-      else:
+        if isinstance(strategies, dict):
+          user_plan = strategies.get('subscription_plan', 'basic')
+          print(f"✅ Используем UserPreferences: {user_plan}")
+        else:
+          user_plan = 'basic'
+          print(f"⚠️ UserPreferences не dict, используем basic")
+      except Exception as e:
+        print(f"❌ Ошибка парсинга UserPreferences: {e}")
         user_plan = 'basic'
-    except:
+    else:
+      print(f"⚠️ UserPreferences не найдены или пусты")
       user_plan = 'basic'
 
+  # Дефолт если ничего не найдено
+  if not user_plan:
+    user_plan = 'basic'
+    print(f"🔄 Используем дефолт: {user_plan}")
+
+  print(f"📋 ИТОГ: user_plan={user_plan}")
+
+  # Маппинг уровней
   plan_levels = {
     "free": 0,
     "basic": 1,
@@ -184,7 +214,56 @@ def check_subscription_access(user_id: int, required_level: SubscriptionLevel, d
   user_level = plan_levels.get(user_plan, 1)
   required_level_value = required_level_map.get(required_level, 1)
 
-  return user_level >= required_level_value
+  result = user_level >= required_level_value
+  print(f"🎯 РЕЗУЛЬТАТ: user_level={user_level} >= required={required_level_value} = {result}")
+
+  return result
+
+
+# def check_subscription_access(user_id: int, required_level: SubscriptionLevel, db: Session) -> bool:
+#   """
+#   Проверяет доступ пользователя на основе уровня подписки
+#   Использует отдельный запрос для получения preferences
+#   """
+#   if required_level == SubscriptionLevel.FREE:
+#     return True
+#
+#   # Загружаем preferences отдельным запросом
+#   user_prefs = db.query(UserPreferences).filter_by(user_id=user_id).first()
+#
+#   # Если нет preferences - считаем как базовый уровень
+#   if not user_prefs:
+#     user_plan = "basic"
+#   else:
+#     # Получаем план из preferences (это уже JSON поле)
+#     import json
+#     try:
+#       if user_prefs.preferred_strategies:  # Используем другое поле для хранения плана
+#         strategies = json.loads(user_prefs.preferred_strategies)
+#         user_plan = strategies.get('subscription_plan', 'basic') if isinstance(strategies, dict) else 'basic'
+#       else:
+#         user_plan = 'basic'
+#     except:
+#       user_plan = 'basic'
+#
+#   plan_levels = {
+#     "free": 0,
+#     "basic": 1,
+#     "premium": 2,
+#     "pro": 3
+#   }
+#
+#   required_level_map = {
+#     SubscriptionLevel.FREE: 0,
+#     SubscriptionLevel.BASIC: 1,
+#     SubscriptionLevel.PREMIUM: 2,
+#     SubscriptionLevel.PRO: 3
+#   }
+#
+#   user_level = plan_levels.get(user_plan, 1)
+#   required_level_value = required_level_map.get(required_level, 1)
+#
+#   return user_level >= required_level_value
 
 
 def require_subscription(level: SubscriptionLevel):

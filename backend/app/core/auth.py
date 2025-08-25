@@ -20,7 +20,11 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24
 
 # Хеширование паролей
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+try:
+    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+except Exception:
+    # Fallback для старых версий bcrypt
+    pwd_context = CryptContext(schemes=["bcrypt"])
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -132,33 +136,63 @@ def get_user_by_email(email: str) -> Optional[User]:
 
 
 def update_subscription_status(user_id: int, status: str, expires_at: datetime = None, plan: str = None):
-  """Обновляет статус подписки пользователя"""
+  """ИСПРАВЛЕНО: Обновляет статус подписки пользователя в ОБОИХ местах"""
+  from backend.app.core.database import UserPreferences
+  import json
+
   db = SessionLocal()
   try:
     user = db.query(User).filter(User.id == user_id).first()
-    if user:
-      # Обновляем основные поля
-      user.subscription_status = status
-      user.subscription_expires_at = expires_at
+    if not user:
+      print(f"❌ Пользователь с ID {user_id} не найден")
+      return None
 
-      # ИСПРАВЛЕНИЕ: Обновляем план в preferences
-      if plan:
-        if not user.preferences:
-          user.preferences = {}
-        user.preferences['subscription_plan'] = plan
+    print(f"🔧 Обновляем подписку для пользователя {user.email}")
+    print(f"   status: {user.subscription_status} -> {status}")
+    print(f"   plan: {user.subscription_plan} -> {plan}")
 
-        # ВАЖНО: Помечаем preferences как измененные для SQLAlchemy
-        from sqlalchemy.orm.attributes import flag_modified
-        flag_modified(user, "preferences")
+    # 1. ОСНОВНАЯ ТАБЛИЦА User - обновляем здесь!
+    user.subscription_status = status
+    user.subscription_expires_at = expires_at
 
-      db.commit()
-      db.refresh(user)
+    if plan:
+      user.subscription_plan = plan  # ← ЭТО ГЛАВНОЕ ИСПРАВЛЕНИЕ!
+      print(f"✅ Установлен User.subscription_plan = {plan}")
 
-      print(f"🔄 Подписка обновлена: user_id={user_id}, status={status}, plan={plan}")
-      print(f"🔄 Preferences: {user.preferences}")
+    # 2. ТАБЛИЦА UserPreferences - для совместимости с существующим кодом
+    if plan:
+      user_prefs = db.query(UserPreferences).filter_by(user_id=user_id).first()
 
-      return user
-    return None
+      if not user_prefs:
+        # Создаем новые preferences
+        print("📝 Создаем новые UserPreferences")
+        user_prefs = UserPreferences(
+          user_id=user_id,
+          favorite_numbers='{"field1": [], "field2": []}',
+          default_lottery="4x20",
+          preferred_strategies=json.dumps({"subscription_plan": plan})
+        )
+        db.add(user_prefs)
+      else:
+        # Обновляем существующие preferences
+        try:
+          strategies = json.loads(user_prefs.preferred_strategies) if user_prefs.preferred_strategies else {}
+        except:
+          strategies = {}
+
+        strategies['subscription_plan'] = plan
+        user_prefs.preferred_strategies = json.dumps(strategies)
+        print(f"✅ Обновлены UserPreferences: {strategies}")
+
+    db.commit()
+    db.refresh(user)
+
+    print(f"🎉 Подписка обновлена успешно!")
+    print(f"   User.subscription_plan = {user.subscription_plan}")
+    print(f"   User.subscription_status = {user.subscription_status}")
+
+    return user
+
   except Exception as e:
     print(f"❌ Ошибка обновления подписки: {e}")
     db.rollback()

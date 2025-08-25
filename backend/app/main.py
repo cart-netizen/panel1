@@ -1,6 +1,7 @@
 import asyncio
+import os
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
@@ -16,6 +17,12 @@ from backend.app.api import user_preferences
 from backend.app.api import analysis_tools, simulation_tools
 from backend.app.api import xgboost_api_endpoints
 from backend.app.api import validation_routes
+from backend.app.api import genetic_routes
+from backend.app.core.rl.rl_generator import GLOBAL_RL_MANAGER
+from backend.app.core.rl.environment import LotteryEnvironment
+from backend.app.api import rl_router
+from backend.app.api import timeseries_routes
+from backend.app.api import bayesian_routes
 
 
 @asynccontextmanager
@@ -182,6 +189,53 @@ async def lifespan(app: FastAPI):
   else:
     print(f"\n[WARN]  Приложение запущено, но лотереи могут работать некорректно!")
 
+  # =====================================
+  # ИНИЦИАЛИЗАЦИЯ RL АГЕНТОВ
+  # =====================================
+  print(f"\n[RL] Инициализация Reinforcement Learning агентов...")
+
+  rl_stats = {
+    'total_agents': 0,
+    'loaded_agents': 0,
+    'errors': []
+  }
+
+  for lottery_type, config in data_manager.LOTTERY_CONFIGS.items():
+    try:
+      print(f"   [RL] Проверка агентов для {lottery_type}...")
+
+      # Получаем RL генератор
+      from backend.app.core.rl.rl_generator import GLOBAL_RL_MANAGER
+      generator = GLOBAL_RL_MANAGER.get_generator(lottery_type, config)
+
+      rl_stats['total_agents'] += 2  # Q-agent и DQN
+
+      # Пытаемся загрузить сохраненные модели
+      if generator.load_models():
+        if generator.q_trained:
+          print(f"   [OK] Q-Learning агент загружен для {lottery_type}")
+          print(f"       Эпизодов: {generator.q_agent.total_episodes}, "
+                f"Q-таблица: {generator.q_agent._get_q_table_size()} записей")
+          rl_stats['loaded_agents'] += 1
+
+        if generator.dqn_trained:
+          print(f"   [OK] DQN агент загружен для {lottery_type}")
+          print(f"       Эпизодов: {generator.dqn_agent.total_episodes}, "
+                f"Память: {len(generator.dqn_agent.memory)} записей")
+          rl_stats['loaded_agents'] += 1
+      else:
+        print(f"   [INFO] RL агенты для {lottery_type} не обучены (требуется обучение)")
+
+    except Exception as e:
+      print(f"   [WARN] Ошибка инициализации RL для {lottery_type}: {e}")
+      rl_stats['errors'].append(str(e))
+
+  print(f"\n[RL STATS] Итоги инициализации RL:")
+  print(f"   Всего агентов: {rl_stats['total_agents']}")
+  print(f"   Загружено: {rl_stats['loaded_agents']}")
+  if rl_stats['errors']:
+    print(f"   Ошибок: {len(rl_stats['errors'])}")
+
   # Загрузка свежих данных при запуске
   print(f"\n[DATA] Автоматическая загрузка свежих данных при запуске...")
   last_update_times = {}
@@ -234,6 +288,25 @@ async def lifespan(app: FastAPI):
     print("   [OK] Планировщик остановлен")
   except Exception as e:
     print(f"   [WARN] Ошибка остановки планировщика: {e}")
+
+  try:
+    from backend.app.core.rl.rl_generator import GLOBAL_RL_MANAGER
+    for lottery_type in data_manager.LOTTERY_CONFIGS.keys():
+      generator = GLOBAL_RL_MANAGER.generators.get(lottery_type)
+      if generator and (generator.q_trained or generator.dqn_trained):
+        # Сохраняем обученные модели
+        if generator.q_trained:
+          q_path = os.path.join(generator.models_dir, "q_agent.pkl")
+          generator.q_agent.save(q_path)
+          print(f"   [SAVE] Q-агент сохранен для {lottery_type}")
+
+        if generator.dqn_trained:
+          dqn_path = os.path.join(generator.models_dir, "dqn_agent.pth")
+          generator.dqn_agent.save(dqn_path)
+          print(f"   [SAVE] DQN агент сохранен для {lottery_type}")
+  except Exception as e:
+    print(f"   [ERROR] Ошибка сохранения RL моделей: {e}")
+
 
   print("   [OK] Приложение корректно остановлено")
 
@@ -294,7 +367,7 @@ app.openapi = custom_openapi
 # Настройка CORS для разрешения запросов от фронтенда
 app.add_middleware(
   CORSMiddleware,
-  allow_origins=["*"],  # В продакшене укажите домен вашего фронтенда
+  allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],  # В продакшене укажите домен вашего фронтенда
   allow_credentials=True,
   allow_methods=["*"],
   allow_headers=["*"],
@@ -331,6 +404,13 @@ app.include_router(
 )
 app.include_router(xgboost_api_endpoints.router, prefix="/api/v1/{lottery_type}", tags=["XGBoost"])
 app.include_router(validation_routes.router, prefix="/api/v1/{lottery_type}", tags=["Validation"])
+app.include_router(genetic_routes.router, prefix="/api/v1/{lottery_type}", tags=["Genetic Algorithm"])
+
+app.include_router(rl_router.router, prefix="/api/v1/{lottery_type}", tags=["RL Analysis"])
+
+app.include_router(timeseries_routes.router, prefix="/api/v1/{lottery_type}", tags=["TimeSeries Analysis"])
+
+app.include_router(bayesian_routes.router, prefix="/api/v1/{lottery_type}", tags=["Bayesian Analysis"])
 
 @app.get("/", summary="Корневой эндпоинт")
 def read_root():

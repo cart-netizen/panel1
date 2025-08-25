@@ -99,8 +99,8 @@ def generate_xgboost_ranked_combinations(df_history, num_to_generate, num_candid
     print(f"Ошибка анализа трендов: {e}")
 
   # 3. Генерация дополнительных умных кандидатов
-  hot_f1, cold_f1 = analyze_hot_cold_numbers(df_history, 1)
-  hot_f2, cold_f2 = analyze_hot_cold_numbers(df_history, 2)
+  hot_f1, cold_f1 = _analyze_hot_cold_numbers_for_generator(df_history, 1)
+  hot_f2, cold_f2 = _analyze_hot_cold_numbers_for_generator(df_history, 2)
 
   # Различные стратегии
   strategies = [
@@ -964,6 +964,52 @@ def generate_multi_strategy_combinations(df_history, num_per_strategy=10):
 
   # Если RF не готов, возвращаем первые 20
   return unique_combinations[:20]
+
+
+def _analyze_hot_cold_numbers_for_generator(df_history: pd.DataFrame, field_num: int, window=20, top_n=10):
+  """
+  Упрощенный анализ горячих/холодных чисел для генератора комбинаций
+
+  Args:
+      df_history: DataFrame с историей
+      field_num: Номер поля (1 или 2)
+      window: Размер окна анализа
+      top_n: Количество топ чисел
+
+  Returns:
+      Tuple[List[int], List[int]]: (горячие числа, холодные числа)
+  """
+  # Берем последние window тиражей
+  recent_df = df_history.tail(window)
+
+  if recent_df.empty:
+    return [], []
+
+  # Выбираем нужное поле
+  field_name = f'Числа_Поле{field_num}_list'
+
+  if field_name not in recent_df.columns:
+    return [], []
+
+  # Считаем частоты
+  number_counter = {}
+  for _, row in recent_df.iterrows():
+    numbers = row.get(field_name, [])
+    if isinstance(numbers, list):
+      for num in numbers:
+        number_counter[num] = number_counter.get(num, 0) + 1
+
+  if not number_counter:
+    return [], []
+
+  # Сортируем по частоте
+  sorted_numbers = sorted(number_counter.items(), key=lambda x: x[1], reverse=True)
+
+  # Берем топ горячих и холодных
+  hot_numbers = [num for num, _ in sorted_numbers[:top_n]]
+  cold_numbers = [num for num, _ in sorted_numbers[-top_n:]]
+
+  return hot_numbers, cold_numbers
 
 def record_rf_performance(rf_score: float, combination_count: int, lottery_type: str):
     """Записывает производительность RF модели"""
