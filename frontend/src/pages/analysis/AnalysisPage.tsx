@@ -27,7 +27,7 @@ import {
   Calculator,
   Target
 } from 'lucide-react';
-
+import { PatternVisualizations } from '../../components/visualization';
 interface CombinationEvaluationForm {
   field1: number[];
   field2: number[];
@@ -36,7 +36,8 @@ interface CombinationEvaluationForm {
 export const AnalysisPage: React.FC = () => {
   const selectedLottery = useSelectedLottery();
   const { showSuccess, showError } = useNotificationActions();
-  const [analysisType, setAnalysisType] = useState<'patterns' | 'clusters' | 'evaluation' | 'xgboost' | 'validation' | 'genetic' | 'rl' | 'timeseries' | 'bayesian'>('patterns');
+  // const [analysisType, setAnalysisType] = useState<'patterns' | 'clusters' | 'evaluation' | 'xgboost' | 'validation' | 'genetic' | 'rl' | 'timeseries' | 'bayesian'>('patterns');
+  const [analysisType, setAnalysisType] = useState<'patterns' | 'clusters' | 'evaluation' | 'pattern_viz' | 'xgboost' | 'validation' | 'genetic' | 'rl' | 'timeseries' | 'bayesian'>('patterns');
   const [analysisResults, setAnalysisResults] = useState<{
     patterns?: any;
     clusters?: any;
@@ -249,6 +250,8 @@ const clustersMutation = useMutation({
     return (
         <div className="space-y-6">
           {/* Общая статистика */}
+          {/* Разделитель */}
+          <div className="my-8 border-t border-gray-200"></div>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
             <div className="bg-blue-50 p-4 rounded-lg">
               <h3 className="font-semibold text-blue-800 mb-2">📊 Проанализировано тиражей</h3>
@@ -564,6 +567,29 @@ const clustersMutation = useMutation({
               )}
             </div>
           )}
+
+          {analysisResults.patterns && (
+            <>
+              {/* Разделитель */}
+              <div className="my-8 border-t border-gray-200"></div>
+
+              {/* Интерактивные графики */}
+              <div className="mt-8">
+                <div className="mb-6">
+                  <h3 className="text-xl font-bold text-gray-900 mb-2">
+                    📊 Интерактивные графики паттернов
+                  </h3>
+                  <p className="text-gray-600">
+                    Визуальное представление найденных закономерностей
+                  </p>
+                </div>
+
+                <PatternVisualizations />
+              </div>
+            </>
+          )}
+
+
 
           {/* Дополнительная информация */}
           <div className="bg-gray-100 p-4 rounded-lg">
