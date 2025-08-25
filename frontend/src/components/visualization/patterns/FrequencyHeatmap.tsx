@@ -124,22 +124,20 @@ const FrequencyHeatmap: React.FC<FrequencyHeatmapProps> = ({ data }) => {
   // Функция для расчета цвета на основе частоты
   const getHeatmapColor = (item: NumberFrequency, maxFreq: number, minFreq: number) => {
     // Особые цвета для статусных чисел
-    if (item.isOverdue) {
-      return '#dc2626'; // Красный для просроченных
-    }
     if (item.isHot) {
-      return '#ea580c'; // Оранжевый для горячих
+      return '#dc2626'; // Ярко-красный для горячих
     }
     if (item.isCold) {
       return '#2563eb'; // Синий для холодных
     }
+    if (item.isOverdue) {
+      return '#f59e0b'; // Желтый для просроченных
+    }
 
-    // Нормализуем частоту от 0 до 1
+    // Обычный градиент для остальных
     const normalized = (item.frequency - minFreq) / (maxFreq - minFreq);
-
-    // Градиент от темно-синего до ярко-зеленого
-    const startColor = { r: 30, g: 58, b: 138 }; // темно-синий
-    const endColor = { r: 34, g: 197, b: 94 };   // зеленый
+    const startColor = { r: 100, g: 150, b: 200 }; // светло-синий
+    const endColor = { r: 34, g: 197, b: 94 };     // зеленый
 
     const r = Math.round(startColor.r + (endColor.r - startColor.r) * normalized);
     const g = Math.round(startColor.g + (endColor.g - startColor.g) * normalized);

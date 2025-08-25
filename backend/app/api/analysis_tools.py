@@ -114,7 +114,7 @@ async def analyze_patterns(
         raise HTTPException(status_code=500, detail=f"Ошибка анализа: {str(e)}")
 
 
-def _analyze_correlations_simple(df_history, top_n=5):
+def _analyze_correlations_simple(df_history, top_n=10):  # ← УВЕЛИЧЕН С 5 ДО 10
     """Упрощенный анализ корреляций между числами"""
 
     correlations = {
@@ -122,21 +122,34 @@ def _analyze_correlations_simple(df_history, top_n=5):
         "field2": []
     }
 
+    print(f"🔍 Простой анализ корреляций: {len(df_history)} тиражей, топ-{top_n}")
+
     # Анализ пар в поле 1
     from collections import Counter
     field1_pairs = Counter()
 
     for _, row in df_history.iterrows():
         numbers = row['Числа_Поле1_list']
-        # Генерируем все пары
-        for i in range(len(numbers)):
-            for j in range(i + 1, len(numbers)):
-                pair = tuple(sorted([numbers[i], numbers[j]]))
-                field1_pairs[pair] += 1
+        if isinstance(numbers, list) and len(numbers) >= 2:
+            # Генерируем все пары
+            for i in range(len(numbers)):
+                for j in range(i + 1, len(numbers)):
+                    pair = tuple(sorted([numbers[i], numbers[j]]))
+                    field1_pairs[pair] += 1
 
-    # Топ пары для поля 1
+    print(f"📊 Поле 1: найдено {len(field1_pairs)} уникальных пар")
+
+    # ИСПРАВЛЕНИЕ: Адаптивный порог для малых выборок
     total_draws = len(df_history)
-    for pair, count in field1_pairs.most_common(top_n):
+    min_count_threshold = max(1, total_draws // 50)  # Минимум 1 раз, или 2% от тиражей
+
+    print(f"🎯 Поле 1: минимальный порог = {min_count_threshold} встреч")
+
+    # Топ пары для поля 1 с более мягким фильтром
+    valid_pairs_f1 = [(pair, count) for pair, count in field1_pairs.items() if count >= min_count_threshold]
+    print(f"✅ Поле 1: {len(valid_pairs_f1)} пар прошли порог")
+
+    for pair, count in sorted(valid_pairs_f1, key=lambda x: x[1], reverse=True)[:top_n]:
         frequency = (count / total_draws) * 100
         correlations["field1"].append({
             "pair": f"{pair[0]}-{pair[1]}",
@@ -149,20 +162,28 @@ def _analyze_correlations_simple(df_history, top_n=5):
 
     for _, row in df_history.iterrows():
         numbers = row['Числа_Поле2_list']
-        if len(numbers) >= 2:  # Только если есть минимум 2 числа
+        if isinstance(numbers, list) and len(numbers) >= 2:  # Только если есть минимум 2 числа
             for i in range(len(numbers)):
                 for j in range(i + 1, len(numbers)):
                     pair = tuple(sorted([numbers[i], numbers[j]]))
                     field2_pairs[pair] += 1
 
+    print(f"📊 Поле 2: найдено {len(field2_pairs)} уникальных пар")
+
+    # Применяем тот же адаптивный порог для поля 2
+    valid_pairs_f2 = [(pair, count) for pair, count in field2_pairs.items() if count >= min_count_threshold]
+    print(f"✅ Поле 2: {len(valid_pairs_f2)} пар прошли порог")
+
     # Топ пары для поля 2
-    for pair, count in field2_pairs.most_common(top_n):
+    for pair, count in sorted(valid_pairs_f2, key=lambda x: x[1], reverse=True)[:top_n]:
         frequency = (count / total_draws) * 100
         correlations["field2"].append({
             "pair": f"{pair[0]}-{pair[1]}",
             "frequency_percent": round(frequency, 1),
             "count": count
         })
+
+    print(f"🎉 Итого найдено: Поле1={len(correlations['field1'])}, Поле2={len(correlations['field2'])}")
 
     return correlations
 

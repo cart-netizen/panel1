@@ -256,6 +256,8 @@ const ReadinessAnalysis: React.FC<ReadinessAnalysisProps> = ({ data }) => {
                 stroke="#6b7280"
                 tick={{ fontSize: 12 }}
                 label={{ value: 'Средний интервал (тиражи)', position: 'bottom' }}
+                tickFormatter={(value) => (Math.round(value * 10) / 10).toString()}
+
               />
               <YAxis
                 dataKey="currentInterval"
@@ -263,6 +265,8 @@ const ReadinessAnalysis: React.FC<ReadinessAnalysisProps> = ({ data }) => {
                 stroke="#6b7280"
                 tick={{ fontSize: 12 }}
                 label={{ value: 'Текущий интервал (тиражи)', angle: -90, position: 'insideLeft' }}
+                tickFormatter={(value) => (Math.round(value * 10) / 10).toString()}
+
               />
               <Tooltip content={<CustomTooltip />} cursor={{ strokeDasharray: '3 3' }} />
               <Scatter dataKey="frequency" shape={<CustomBubble />} />

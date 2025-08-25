@@ -119,13 +119,13 @@ class AdvancedPatternAnalyzer:
 
     return position_stats
 
-  def find_number_correlations(self, df_history, min_support=0.1):
+  def find_number_correlations(self, df_history, min_support=0.02):  # ← СНИЖЕН С 0.1 ДО 0.02 (2%)
     """
     Находит числа, которые часто выпадают вместе.
 
     Args:
         df_history: DataFrame с историей
-        min_support: Минимальная поддержка (доля тиражей)
+        min_support: Минимальная поддержка (доля тиражей) - СНИЖЕНО до 2%
 
     Returns:
         dict: Корреляции для каждого поля
@@ -137,26 +137,54 @@ class AdvancedPatternAnalyzer:
       pair_counter = Counter()
       total_draws = 0
 
+      print(f"🔍 Анализируем корреляции для поля {field_num}...")
+
       for nums_list in df_history[field_col].dropna():
         if isinstance(nums_list, list) and len(nums_list) >= 2:
           total_draws += 1
-          # Все пары из 4 чисел
+          # Все пары из чисел
           for pair in itertools.combinations(sorted(nums_list), 2):
             pair_counter[pair] += 1
 
+      print(f"📊 Поле {field_num}: обработано {total_draws} тиражей, найдено {len(pair_counter)} уникальных пар")
+
       if total_draws == 0:
+        print(f"⚠️ Поле {field_num}: нет данных для анализа")
         continue
 
-      # Фильтруем по минимальной поддержке
-      min_count = int(total_draws * min_support)
-      frequent_pairs = [
-        (pair, count, (count / total_draws) * 100)
-        for pair, count in pair_counter.items()
-        if count >= min_count
-      ]
+      # ИСПРАВЛЕНИЕ 1: Адаптивный порог на основе количества данных
+      if total_draws < 20:
+        # Для малых выборок - берем пары встречающиеся хотя бы 1 раз
+        adaptive_min_support = 1 / total_draws
+      elif total_draws < 50:
+        # Для средних выборок - 2% или минимум 1 раз
+        adaptive_min_support = max(0.02, 1 / total_draws)
+      else:
+        # Для больших выборок - используем заданный min_support, но не менее 1%
+        adaptive_min_support = max(min_support, 0.01)
+
+      min_count = max(1, int(total_draws * adaptive_min_support))
+
+      print(f"🎯 Поле {field_num}: порог = {adaptive_min_support:.3f} ({min_count} встреч)")
+
+      # ИСПРАВЛЕНИЕ 2: Более умная фильтрация
+      frequent_pairs = []
+      for pair, count in pair_counter.items():
+        frequency_percent = (count / total_draws) * 100
+        if count >= min_count:
+          frequent_pairs.append((pair, count, frequency_percent))
 
       # Сортируем по частоте
       frequent_pairs.sort(key=lambda x: x[1], reverse=True)
+
+      # ИСПРАВЛЕНИЕ 3: Берем больше пар, но ограничиваем разумным числом
+      max_pairs = min(50, len(frequent_pairs))  # Было 20, стало 50
+      frequent_pairs = frequent_pairs[:max_pairs]
+
+      print(f"✅ Поле {field_num}: найдено {len(frequent_pairs)} частых пар")
+      if frequent_pairs:
+        top_pair = frequent_pairs[0]
+        print(f"🔥 Топ пара поля {field_num}: {top_pair[0]} ({top_pair[2]:.1f}%, {top_pair[1]}x)")
 
       # Также находим "антикорреляции" - числа, которые редко встречаются вместе
       all_pairs = set(itertools.combinations(range(1, 21), 2))
@@ -164,9 +192,12 @@ class AdvancedPatternAnalyzer:
       never_together = list(all_pairs - appeared_pairs)[:10]  # Топ-10
 
       results[f'field{field_num}'] = {
-        'frequent_pairs': frequent_pairs[:20],  # Топ-20 пар
+        'frequent_pairs': frequent_pairs,
         'never_together': never_together,
-        'total_draws': total_draws
+        'total_draws': total_draws,
+        'total_unique_pairs': len(pair_counter),
+        'min_count_used': min_count,
+        'adaptive_threshold': adaptive_min_support
       }
 
     return results
