@@ -1,0 +1,224 @@
+/* Дополнительные стили для страницы анализа */
+
+/* Анимации для выбора чисел */
+@keyframes numberPop {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.2); }
+  100% { transform: scale(1.1); }
+}
+
+@keyframes clusterGlow {
+  0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4); }
+  70% { box-shadow: 0 0 0 10px rgba(59, 130, 246, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+}
+
+/* Специальные эффекты для кластеров */
+.cluster-visualization {
+  position: relative;
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  border-radius: 12px;
+  padding: 1rem;
+  overflow: hidden;
+}
+
+.cluster-visualization::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: radial-gradient(circle at 30% 40%, rgba(59, 130, 246, 0.05) 0%, transparent 50%),
+              radial-gradient(circle at 80% 20%, rgba(139, 92, 246, 0.05) 0%, transparent 50%),
+              radial-gradient(circle at 40% 80%, rgba(16, 185, 129, 0.05) 0%, transparent 50%);
+  pointer-events: none;
+}
+
+/* Hover эффекты для кластерных элементов */
+.cluster-item:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px -5px rgba(0, 0, 0, 0.1);
+}
+
+.cluster-item:hover .cluster-numbers {
+  animation: clusterGlow 1.5s ease-in-out;
+}
+
+/* Градиенты для различных типов анализа */
+.pattern-analysis-gradient {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.cluster-analysis-gradient {
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+}
+
+.evaluation-analysis-gradient {
+  background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+}
+
+/* Специальные индикаторы для паттернов */
+.hot-number-indicator {
+  position: relative;
+  overflow: hidden;
+}
+
+.hot-number-indicator::after {
+  content: '🔥';
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  font-size: 8px;
+  animation: bounce 2s infinite;
+}
+
+.cold-number-indicator {
+  position: relative;
+  overflow: hidden;
+}
+
+.cold-number-indicator::after {
+  content: '❄️';
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  font-size: 8px;
+  animation: pulse 2s infinite;
+}
+
+/* Стили для скоринга */
+.score-display {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  font-weight: 800;
+  text-shadow: 0 0 30px rgba(102, 126, 234, 0.5);
+}
+
+.score-progress {
+  background: linear-gradient(90deg, #ef4444 0%, #f59e0b 25%, #eab308 50%, #22c55e 75%, #10b981 100%);
+  height: 8px;
+  border-radius: 4px;
+  position: relative;
+  overflow: hidden;
+}
+
+.score-progress::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.3) 50%, transparent 100%);
+  animation: shimmer 2s infinite;
+}
+
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+/* Корреляционная матрица */
+.correlation-matrix {
+  display: grid;
+  gap: 2px;
+  background: #f8fafc;
+  padding: 4px;
+  border-radius: 8px;
+}
+
+.correlation-cell {
+  aspect-ratio: 1;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.correlation-cell:hover {
+  transform: scale(1.1);
+  z-index: 10;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* Анимированные фоны для результатов */
+.analysis-result-container {
+  position: relative;
+  overflow: hidden;
+}
+
+.analysis-result-container::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: linear-gradient(45deg, transparent 30%, rgba(59, 130, 246, 0.02) 50%, transparent 70%);
+  animation: rotate 20s linear infinite;
+  pointer-events: none;
+}
+
+@keyframes rotate {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Специальные стили для мобильных устройств */
+@media (max-width: 768px) {
+  .number-button {
+    width: 2rem;
+    height: 2rem;
+    font-size: 0.75rem;
+  }
+
+  .cluster-item {
+    padding: 0.75rem;
+  }
+
+  .analysis-panel {
+    padding: 1rem;
+  }
+
+  .score-display {
+    font-size: 2rem;
+  }
+}
+
+/* Темная тема (если нужно) */
+@media (prefers-color-scheme: dark) {
+  .cluster-visualization {
+    background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+  }
+
+  .analysis-result-container::before {
+    background: linear-gradient(45deg, transparent 30%, rgba(59, 130, 246, 0.05) 50%, transparent 70%);
+  }
+}
+
+/* Вспомогательные утилиты */
+.text-shadow-sm {
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.text-shadow-md {
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.backdrop-blur-light {
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+/* Переходы для loading состояний */
+.loading-shimmer {
+  background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
