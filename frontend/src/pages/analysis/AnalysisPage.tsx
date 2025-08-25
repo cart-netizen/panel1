@@ -37,15 +37,6 @@ export const AnalysisPage: React.FC = () => {
   const selectedLottery = useSelectedLottery();
   const { showSuccess, showError } = useNotificationActions();
   const [analysisType, setAnalysisType] = useState<'patterns' | 'clusters' | 'evaluation' | 'xgboost' | 'validation' | 'genetic' | 'rl' | 'timeseries' | 'bayesian'>('patterns');
-  // const [analysisResults, setAnalysisResults] = useState<{
-  //   patterns: any;
-  //   clusters: any;
-  //   evaluation: any;
-  // }>({
-  //   patterns: null,
-  //   clusters: null,
-  //   evaluation: null
-  // });
   const [analysisResults, setAnalysisResults] = useState<{
     patterns?: any;
     clusters?: any;
@@ -84,20 +75,6 @@ export const AnalysisPage: React.FC = () => {
 
   const config = LOTTERY_CONFIGS[selectedLottery];
 
-  // Мутация для анализа паттернов
-  // const patternsMutation = useMutation({
-  //   mutationFn: async () => {
-  //     const response = await apiClient.get(`/${selectedLottery}/analyze-patterns`);
-  //     return response.data;
-  //   },
-  //   onSuccess: (data) => {
-  //     setAnalysisResults(prev => ({ ...prev, patterns: data }));
-  //     showSuccess('Анализ завершен', 'Паттерны успешно проанализированы');
-  //   },
-  //   onError: (error: any) => {
-  //     showError('Ошибка анализа', error.message || 'Не удалось выполнить анализ паттернов');
-  //   },
-  // });
   const patternsMutation = useMutation({
     mutationFn: async () => {
       const response = await apiClient.post(`/analysis/patterns`, {
@@ -181,6 +158,33 @@ const clustersMutation = useMutation({
     localStorage.removeItem(`analysisResults_${selectedLottery}`);
   }, [selectedLottery]);
 
+  //Функция для получения динамического текста кнопки
+  const getAnalysisButtonText = () => {
+    if (isAnalysisRunning) {
+      switch (analysisType) {
+        case 'patterns':
+          return 'Анализируем паттерны...';
+        case 'clusters':
+          return 'Выполняем кластеризацию...';
+        case 'evaluation':
+          return 'Оцениваем комбинацию...';
+        default:
+          return 'Анализируем...';
+      }
+    } else {
+      switch (analysisType) {
+        case 'patterns':
+          return 'Запустить анализ паттернов';
+        case 'clusters':
+          return 'Запустить кластеризацию';
+        case 'evaluation':
+          return 'Запустить оценку комбинации';
+        default:
+          return 'Запустить анализ';
+      }
+    }
+  };
+
   const handleRunAnalysis = () => {
     switch (analysisType) {
       case 'patterns':
@@ -218,195 +222,375 @@ const clustersMutation = useMutation({
       );
     }
 
+    // ИСПРАВЛЕНИЕ: Извлекаем данные из правильной структуры API
+  const analyzedPeriod = data.data_stats?.total_draws || 0;
+  const totalDraws = data.data_stats?.analyzed_period || 0;
+
+  // Подсчитываем количество найденных паттернов
+  const hotField1 = data.hot_cold?.field1?.hot_numbers || [];
+  const hotField2 = data.hot_cold?.field2?.hot_numbers || [];
+  const coldField1 = data.hot_cold?.field1?.cold_numbers || [];
+  const coldField2 = data.hot_cold?.field2?.cold_numbers || [];
+
+  const patternsFound = hotField1.length + hotField2.length + coldField1.length + coldField2.length;
+
+  // Подсчитываем корреляции
+  const correlationsField1 = data.correlations?.field1 || [];
+  const correlationsField2 = data.correlations?.field2 || [];
+  const totalCorrelations = correlationsField1.length + correlationsField2.length;
+
+  // Генерируем оценку уверенности на основе данных
+  let confidenceScore = 0.5; // базовая уверенность
+  if (totalDraws > 50) confidenceScore += 0.2;
+  if (patternsFound > 10) confidenceScore += 0.1;
+  if (totalCorrelations > 5) confidenceScore += 0.1;
+  confidenceScore = Math.min(0.95, confidenceScore);
+
     return (
-      <div className="space-y-6">
-        {/* Общая статистика */}
-        <div className="bg-white border border-gray-200 rounded-lg p-4">
-          <h3 className="font-semibold text-gray-800 mb-3">📊 Анализ паттернов</h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="text-center">
-              <div className="text-2xl font-bold text-blue-600">
-                {data.analyzed_draws || 0}
-              </div>
-              <div className="text-sm text-gray-600">Проанализировано тиражей</div>
+        <div className="space-y-6">
+          {/* Общая статистика */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+            <div className="bg-blue-50 p-4 rounded-lg">
+              <h3 className="font-semibold text-blue-800 mb-2">📊 Проанализировано тиражей</h3>
+              <p className="text-2xl font-bold text-blue-600">{totalDraws}</p>
+              <p className="text-sm text-blue-500">за {analyzedPeriod} последних записей</p>
             </div>
-            <div className="text-center">
-              <div className="text-2xl font-bold text-green-600">
-                {data.hot_numbers?.length || 0}
-              </div>
-              <div className="text-sm text-gray-600">Горячих чисел</div>
+
+            <div className="bg-red-50 p-4 rounded-lg">
+              <h3 className="font-semibold text-red-800 mb-2">🔥 Горячих чисел</h3>
+              <p className="text-2xl font-bold text-red-600">{hotField1.length + hotField2.length}</p>
+              <p className="text-sm text-red-500">активных паттернов</p>
             </div>
-            <div className="text-center">
-              <div className="text-2xl font-bold text-red-600">
-                {data.cold_numbers?.length || 0}
-              </div>
-              <div className="text-sm text-gray-600">Холодных чисел</div>
+
+            <div className="bg-indigo-50 p-4 rounded-lg">
+              <h3 className="font-semibold text-indigo-800 mb-2">❄️ Холодных чисел</h3>
+              <p className="text-2xl font-bold text-indigo-600">{coldField1.length + coldField2.length}</p>
+              <p className="text-sm text-indigo-500">готовых к выходу</p>
             </div>
-            <div className="text-center">
-              <div className="text-2xl font-bold text-purple-600">
-                {data.anomalies_count || 0}
-              </div>
-              <div className="text-sm text-gray-600">Аномалий</div>
+
+            <div className="bg-green-50 p-4 rounded-lg">
+              <h3 className="font-semibold text-green-800 mb-2">🎯 Уверенность</h3>
+              <p className="text-2xl font-bold text-green-600">{(confidenceScore * 100).toFixed(1)}%</p>
+              <p className="text-sm text-green-500">качество анализа</p>
             </div>
           </div>
-        </div>
 
-        {/* Горячие числа */}
-        {data.hot_cold_analysis && (
-          <div className="bg-white border border-gray-200 rounded-lg p-4">
-            <h4 className="font-semibold text-gray-800 mb-3">🔥 Горячие и холодные числа</h4>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Поле 1 */}
-              <div>
-                <h5 className="text-sm font-medium text-gray-700 mb-2">Поле 1:</h5>
-                <div className="space-y-2">
-                  <div>
-                    <span className="text-sm font-medium text-red-600">Горячие:</span>
-                    <div className="flex flex-wrap gap-1 mt-1">
-                      {(data.hot_cold_analysis.field1?.hot || []).map((num: number) => (
-                        <span key={num} className="bg-red-100 text-red-800 px-2 py-1 rounded text-sm">
-                          {num}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                  <div>
-                    <span className="text-sm font-medium text-blue-600">Холодные:</span>
-                    <div className="flex flex-wrap gap-1 mt-1">
-                      {(data.hot_cold_analysis.field1?.cold || []).map((num: number) => (
-                        <span key={num} className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-sm">
-                          {num}
-                        </span>
-                      ))}
-                    </div>
+          {/* Горячие и холодные числа */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <h4 className="font-medium mb-3">🔥 Горячие числа</h4>
+
+              {hotField1.length > 0 && (
+                <div className="mb-3">
+                  <h5 className="text-sm font-medium text-gray-700 mb-2">Поле 1:</h5>
+                  <div className="flex flex-wrap gap-2">
+                    {hotField1.map((num: number, index: number) => (
+                      <span key={index} className="bg-red-500 text-white px-2 py-1 rounded text-sm font-medium">
+                        {num}
+                      </span>
+                    ))}
                   </div>
                 </div>
+              )}
+
+              {hotField2.length > 0 && (
+                <div>
+                  <h5 className="text-sm font-medium text-gray-700 mb-2">Поле 2:</h5>
+                  <div className="flex flex-wrap gap-2">
+                    {hotField2.map((num: number, index: number) => (
+                      <span key={index} className="bg-red-500 text-white px-2 py-1 rounded text-sm font-medium">
+                        {num}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {hotField1.length === 0 && hotField2.length === 0 && (
+                <p className="text-gray-500 italic">Горячие числа не найдены</p>
+              )}
+            </div>
+
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <h4 className="font-medium mb-3">❄️ Холодные числа</h4>
+
+              {coldField1.length > 0 && (
+                <div className="mb-3">
+                  <h5 className="text-sm font-medium text-gray-700 mb-2">Поле 1:</h5>
+                  <div className="flex flex-wrap gap-2">
+                    {coldField1.map((num: number, index: number) => (
+                      <span key={index} className="bg-blue-500 text-white px-2 py-1 rounded text-sm font-medium">
+                        {num}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {coldField2.length > 0 && (
+                <div>
+                  <h5 className="text-sm font-medium text-gray-700 mb-2">Поле 2:</h5>
+                  <div className="flex flex-wrap gap-2">
+                    {coldField2.map((num: number, index: number) => (
+                      <span key={index} className="bg-blue-500 text-white px-2 py-1 rounded text-sm font-medium">
+                        {num}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {coldField1.length === 0 && coldField2.length === 0 && (
+                <p className="text-gray-500 italic">Холодные числа не найдены</p>
+              )}
+            </div>
+          </div>
+
+          {/* Частые пары чисел (корреляции) */}
+          {(correlationsField1.length > 0 || correlationsField2.length > 0) && (
+            <div className="bg-yellow-50 p-4 rounded-lg">
+              <h4 className="font-medium mb-3">🔗 Частые пары чисел</h4>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {correlationsField1.length > 0 && (
+                  <div>
+                    <h5 className="text-sm font-medium text-gray-700 mb-2">Поле 1:</h5>
+                    <div className="space-y-1">
+                      {correlationsField1.map((correlation: any, index: number) => (
+                        <div key={index} className="flex justify-between items-center bg-white p-2 rounded text-sm">
+                          <span className="font-medium">{correlation.pair}</span>
+                          <span className="text-yellow-600">
+                            {correlation.frequency_percent}% ({correlation.count}x)
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {correlationsField2.length > 0 && (
+                  <div>
+                    <h5 className="text-sm font-medium text-gray-700 mb-2">Поле 2:</h5>
+                    <div className="space-y-1">
+                      {correlationsField2.map((correlation: any, index: number) => (
+                        <div key={index} className="flex justify-between items-center bg-white p-2 rounded text-sm">
+                          <span className="font-medium">{correlation.pair}</span>
+                          <span className="text-yellow-600">
+                            {correlation.frequency_percent}% ({correlation.count}x)
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
+            </div>
+          )}
+
+          {/* Анализ избранных чисел (если есть) */}
+          {data.favorites_analysis && (
+            <div className="bg-purple-50 p-4 rounded-lg">
+              <h4 className="font-medium mb-3">⭐ Анализ ваших избранных чисел</h4>
+
+              {/* Поле 1 */}
+              {data.favorites_analysis.field1 && Object.keys(data.favorites_analysis.field1).length > 0 && (
+                <div className="mb-4">
+                  <h5 className="text-sm font-medium text-gray-700 mb-2">Избранные числа поля 1:</h5>
+
+                  {/* Отображаем числа как badges */}
+                  <div className="flex flex-wrap gap-2 mb-2">
+                    {Object.entries(data.favorites_analysis.field1).map(([num, stats]: [string, any]) => (
+                      <span
+                        key={num}
+                        className="bg-purple-500 text-white px-2 py-1 rounded text-sm font-medium"
+                        title={`Частота: ${stats.frequency || 0} раз (${(stats.percentage || 0).toFixed(1)}%)`}
+                      >
+                        {num}
+                      </span>
+                    ))}
+                  </div>
+
+                  {/* Статистика производительности */}
+                  <div className="bg-white p-2 rounded border text-sm">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <span className="font-medium text-gray-600">Средняя частота:</span>
+                        <span className="ml-2 text-purple-600">
+                          {(() => {
+                            const stats = Object.values(data.favorites_analysis.field1);
+                            const avgFreq = stats.length > 0
+                              ? (stats.reduce((sum: number, s: any) => sum + (s.frequency || 0), 0) / stats.length).toFixed(1)
+                              : '0';
+                            return `${avgFreq} раз`;
+                          })()}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="font-medium text-gray-600">Средний процент:</span>
+                        <span className="ml-2 text-purple-600">
+                          {(() => {
+                            const stats = Object.values(data.favorites_analysis.field1);
+                            const avgPct = stats.length > 0
+                              ? (stats.reduce((sum: number, s: any) => sum + (s.percentage || 0), 0) / stats.length).toFixed(1)
+                              : '0';
+                            return `${avgPct}%`;
+                          })()}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Детальная статистика по каждому числу */}
+                  <div className="mt-2 space-y-1">
+                    {Object.entries(data.favorites_analysis.field1).map(([num, stats]: [string, any]) => (
+                      <div key={num} className="flex justify-between items-center bg-white p-1 px-2 rounded text-xs">
+                        <span className="font-medium">Число {num}:</span>
+                        <span className="text-purple-600">
+                          {stats.frequency || 0} раз ({(stats.percentage || 0).toFixed(1)}%)
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Поле 2 */}
-              <div>
-                <h5 className="text-sm font-medium text-gray-700 mb-2">Поле 2:</h5>
-                <div className="space-y-2">
-                  <div>
-                    <span className="text-sm font-medium text-red-600">Горячие:</span>
-                    <div className="flex flex-wrap gap-1 mt-1">
-                      {(data.hot_cold_analysis.field2?.hot || []).map((num: number) => (
-                        <span key={num} className="bg-red-100 text-red-800 px-2 py-1 rounded text-sm">
-                          {num}
+              {data.favorites_analysis.field2 && Object.keys(data.favorites_analysis.field2).length > 0 && (
+                <div className="mb-4">
+                  <h5 className="text-sm font-medium text-gray-700 mb-2">Избранные числа поля 2:</h5>
+
+                  {/* Отображаем числа как badges */}
+                  <div className="flex flex-wrap gap-2 mb-2">
+                    {Object.entries(data.favorites_analysis.field2).map(([num, stats]: [string, any]) => (
+                      <span
+                        key={num}
+                        className="bg-purple-500 text-white px-2 py-1 rounded text-sm font-medium"
+                        title={`Частота: ${stats.frequency || 0} раз (${(stats.percentage || 0).toFixed(1)}%)`}
+                      >
+                        {num}
+                      </span>
+                    ))}
+                  </div>
+
+                  {/* Статистика производительности */}
+                  <div className="bg-white p-2 rounded border text-sm">
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <span className="font-medium text-gray-600">Средняя частота:</span>
+                        <span className="ml-2 text-purple-600">
+                          {(() => {
+                            const stats = Object.values(data.favorites_analysis.field2);
+                            const avgFreq = stats.length > 0
+                              ? (stats.reduce((sum: number, s: any) => sum + (s.frequency || 0), 0) / stats.length).toFixed(1)
+                              : '0';
+                            return `${avgFreq} раз`;
+                          })()}
                         </span>
-                      ))}
-                    </div>
-                  </div>
-                  <div>
-                    <span className="text-sm font-medium text-blue-600">Холодные:</span>
-                    <div className="flex flex-wrap gap-1 mt-1">
-                      {(data.hot_cold_analysis.field2?.cold || []).map((num: number) => (
-                        <span key={num} className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-sm">
-                          {num}
+                      </div>
+                      <div>
+                        <span className="font-medium text-gray-600">Средний процент:</span>
+                        <span className="ml-2 text-purple-600">
+                          {(() => {
+                            const stats = Object.values(data.favorites_analysis.field2);
+                            const avgPct = stats.length > 0
+                              ? (stats.reduce((sum: number, s: any) => sum + (s.percentage || 0), 0) / stats.length).toFixed(1)
+                              : '0';
+                            return `${avgPct}%`;
+                          })()}
                         </span>
-                      ))}
+                      </div>
                     </div>
                   </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
 
-        {/* Корреляции */}
-        {data.correlations && (
-          <div className="bg-white border border-gray-200 rounded-lg p-4">
-            <h4 className="font-semibold text-gray-800 mb-3">🔗 Частые пары чисел</h4>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Поле 1 */}
+                  {/* Детальная статистика по каждому числу */}
+                  <div className="mt-2 space-y-1">
+                    {Object.entries(data.favorites_analysis.field2).map(([num, stats]: [string, any]) => (
+                      <div key={num} className="flex justify-between items-center bg-white p-1 px-2 rounded text-xs">
+                        <span className="font-medium">Число {num}:</span>
+                        <span className="text-purple-600">
+                          {stats.frequency || 0} раз ({(stats.percentage || 0).toFixed(1)}%)
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Если нет избранных чисел */}
+              {(!data.favorites_analysis.field1 || Object.keys(data.favorites_analysis.field1).length === 0) &&
+               (!data.favorites_analysis.field2 || Object.keys(data.favorites_analysis.field2).length === 0) && (
+                <div className="text-center py-4">
+                  <p className="text-gray-500 italic mb-2">У вас нет избранных чисел для анализа</p>
+                  <p className="text-sm text-gray-400">
+                    Настройте избранные числа в профиле для получения персонализированной аналитики
+                  </p>
+                </div>
+              )}
+
+              {/* Общие рекомендации по избранным числам */}
+              {((data.favorites_analysis.field1 && Object.keys(data.favorites_analysis.field1).length > 0) ||
+                (data.favorites_analysis.field2 && Object.keys(data.favorites_analysis.field2).length > 0)) && (
+                <div className="mt-3 p-3 bg-purple-100 rounded border-l-4 border-purple-400">
+                  <h6 className="font-medium text-purple-800 mb-1">💡 Анализ производительности:</h6>
+                  <p className="text-sm text-purple-700">
+                    {(() => {
+                      // Подсчитываем общую статистику
+                      let totalNums = 0;
+                      let totalFreq = 0;
+                      let highPerformers = 0;
+
+                      [data.favorites_analysis.field1, data.favorites_analysis.field2].forEach(field => {
+                        if (field) {
+                          Object.values(field).forEach((stats: any) => {
+                            totalNums++;
+                            totalFreq += stats.frequency || 0;
+                            if ((stats.percentage || 0) > 15) highPerformers++; // Числа с > 15% появлением
+                          });
+                        }
+                      });
+
+                      const avgPerformance = totalNums > 0 ? (totalFreq / totalNums).toFixed(1) : '0';
+
+                      if (highPerformers > 0) {
+                        return `У вас ${highPerformers} высокопроизводительных числа со средней частотой ${avgPerformance} появлений.`;
+                      } else if (totalNums > 0) {
+                        return `Ваши избранные числа показывают среднюю производительность (${avgPerformance} появлений в среднем).`;
+                      } else {
+                        return "Добавьте избранные числа для получения персонализированного анализа.";
+                      }
+                    })()}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Дополнительная информация */}
+          <div className="bg-gray-100 p-4 rounded-lg">
+            <h4 className="font-medium mb-2">ℹ️ Информация об анализе</h4>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-gray-600">
               <div>
-                <h5 className="text-sm font-medium text-gray-700 mb-2">Поле 1:</h5>
-                <div className="space-y-1">
-                  {(data.correlations.field1 || []).slice(0, 5).map((pair: any, idx: number) => (
-                    <div key={idx} className="flex justify-between text-sm">
-                      <span className="bg-green-100 text-green-800 px-2 py-1 rounded">
-                        {pair.pair}
-                      </span>
-                      <span className="text-green-700">
-                        {pair.frequency_percent}% ({pair.count} раз)
-                      </span>
-                    </div>
-                  ))}
-                </div>
+                <strong>Период анализа:</strong> {analyzedPeriod} последних тиражей
               </div>
-
-              {/* Поле 2 */}
               <div>
-                <h5 className="text-sm font-medium text-gray-700 mb-2">Поле 2:</h5>
-                <div className="space-y-1">
-                  {(data.correlations.field2 || []).slice(0, 5).map((pair: any, idx: number) => (
-                    <div key={idx} className="flex justify-between text-sm">
-                      <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded">
-                        {pair.pair}
-                      </span>
-                      <span className="text-yellow-700">
-                        {pair.frequency_percent}% ({pair.count} раз)
-                      </span>
-                    </div>
-                  ))}
-                </div>
+                <strong>Всего найдено паттернов:</strong> {patternsFound}
+              </div>
+              <div>
+                <strong>Тип лотереи:</strong> {data.data_stats?.lottery_type || selectedLottery}
               </div>
             </div>
-          </div>
-        )}
 
-        {/* Аномалии */}
-        {data.anomalies && (
-          <div className="bg-white border border-gray-200 rounded-lg p-4">
-            <h4 className="font-semibold text-gray-800 mb-3">⚠️ Статистические аномалии</h4>
-            <div className="space-y-3">
-              {Object.entries(data.anomalies).map(([type, anomaly]: [string, any]) => (
-                <div key={type} className="bg-orange-50 p-3 rounded">
-                  <div className="font-medium text-orange-800 mb-1">
-                    {type === 'unusual_sums' ? 'Необычные суммы' :
-                     type === 'unusual_spreads' ? 'Необычные размахи' :
-                     type === 'consecutive_numbers' ? 'Последовательные числа' :
-                     type === 'all_even_odd' ? 'Все четные/нечетные' : type}
-                  </div>
-                  <div className="text-sm text-orange-700">
-                    Найдено случаев: {anomaly.count} ({anomaly.percentage?.toFixed(1)}% от всех тиражей)
-                  </div>
-                  {anomaly.examples && anomaly.examples.length > 0 && (
-                    <div className="text-xs text-orange-600 mt-2">
-                      Примеры: {anomaly.examples.slice(0, 3).map((ex: any) =>
-                        `Тираж ${ex.draw}: ${ex.numbers}`
-                      ).join(', ')}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Метаданные */}
-        <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-          <h4 className="font-semibold text-gray-800 mb-3">📊 Метаданные анализа</h4>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
-            <div>
-              <span className="text-gray-600">Глубина анализа:</span>
-              <div className="font-medium">{data.depth || 100} тиражей</div>
-            </div>
-            <div>
-              <span className="text-gray-600">Статус:</span>
-              <div className="font-medium">{data.status || 'completed'}</div>
-            </div>
-            <div>
-              <span className="text-gray-600">Время анализа:</span>
-              <div className="font-medium">
-                {data.timestamp ? new Date(data.timestamp).toLocaleString() : 'N/A'}
+            {data.date_range && (
+              <div className="mt-2 text-sm text-gray-500">
+                <strong>Временной диапазон:</strong> {' '}
+                {data.date_range.from ? new Date(data.date_range.from).toLocaleDateString('ru-RU') : 'н/д'} - {' '}
+                {data.date_range.to ? new Date(data.date_range.to).toLocaleDateString('ru-RU') : 'н/д'}
               </div>
-            </div>
+            )}
           </div>
         </div>
-      </div>
-    );
-  };
+      );
+    };
 
   const renderClustersResult = (data: any) => {
     if (!data) return null;
@@ -414,22 +598,22 @@ const clustersMutation = useMutation({
     // Обработка ошибок
     if (data.error) {
       return (
-        <div className="p-4 bg-red-100 border border-red-300 rounded-lg">
-          <h3 className="font-semibold text-red-800">⚠️ Ошибка кластеризации</h3>
-          <p className="text-sm text-red-600">{data.message}</p>
-          <button
-            onClick={() => clustersMutation.mutate()}
-            className="mt-2 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
-          >
-            Повторить попытку
-          </button>
-        </div>
+          <div className="p-4 bg-red-100 border border-red-300 rounded-lg">
+            <h3 className="font-semibold text-red-800">⚠️ Ошибка кластеризации</h3>
+            <p className="text-sm text-red-600">{data.message}</p>
+            <button
+                onClick={() => clustersMutation.mutate()}
+                className="mt-2 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
+            >
+              Повторить попытку
+            </button>
+          </div>
       );
     }
 
     // Обработка структуры данных от backend
     const getClustersInfo = () => {
-      if (!data.clusters) return { field1Groups: {}, field2Groups: {}, totalClusters: 0 };
+      if (!data.clusters) return {field1Groups: {}, field2Groups: {}, totalClusters: 0};
 
       // Группируем числа по кластерам для field1
       const field1Groups: { [key: number]: number[] } = {};
@@ -1024,8 +1208,7 @@ const clustersMutation = useMutation({
                     icon={isAnalysisRunning ? <RefreshCw className="animate-spin" /> : <Target />}
                     size="lg"
                   >
-                    {isAnalysisRunning ?
-                      'Анализируем...' : 'Запустить анализ паттернов'}
+                    {getAnalysisButtonText()}
                   </Button>
                 </div>
 
