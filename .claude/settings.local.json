@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m py_compile:*)",
+      "Bash(python:*)",
+      "Bash(timeout 15 python -m uvicorn backend.app.main:app --reload --port 8002)",
+      "Bash(timeout 10 python:*)",
+      "Bash(timeout 15 python -m uvicorn backend.app.main:app --port 8002)",
+      "Bash(rm:*)",
+      "Bash(curl:*)",
+      "Bash(pip install:*)",
+      "Bash(timeout:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

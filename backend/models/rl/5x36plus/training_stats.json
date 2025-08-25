@@ -1,0 +1,27 @@
+{
+  "q_learning": {
+    "total_episodes": 9000,
+    "total_steps": 757290,
+    "total_reward": -65946397.418200076,
+    "average_reward": -7327.37749091112,
+    "win_rate": 0.1375959011739228,
+    "best_episode": 8932,
+    "best_reward": -966.226688567624,
+    "final_epsilon": 0.00998645168764533,
+    "q_table_size": 24434,
+    "unique_states": 1,
+    "unique_actions": 24434
+  },
+  "dqn": {
+    "total_episodes": 5300,
+    "total_steps": 445310,
+    "total_reward": -39477813.9681179,
+    "average_reward": -7448.6441449279055,
+    "win_rate": 0.11048483079203252,
+    "best_episode": 4131,
+    "best_reward": -986.5457299644397,
+    "final_epsilon": 0.00998645168764533,
+    "final_loss": 8295.792116699218,
+    "memory_size": 10000
+  }
+}
