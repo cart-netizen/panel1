@@ -67,6 +67,31 @@ module.exports = {
           900: '#7f1d1d',
         }
       },
+      gridTemplateColumns: {
+        // Кастомные сетки для тепловых карт
+        '20': 'repeat(20, minmax(0, 1fr))',
+        '36': 'repeat(36, minmax(0, 1fr))',
+      },
+      animation: {
+        'fade-in-scale': 'fadeInScale 0.8s ease-out both',
+        'bounce-in': 'bounceIn 0.8s ease-out',
+        'fade-in': 'fadeIn 0.3s ease-out',
+      },
+      keyframes: {
+        fadeInScale: {
+          '0%': { opacity: '0', transform: 'scale(0.8)' },
+          '100%': { opacity: '1', transform: 'scale(1)' },
+        },
+        bounceIn: {
+          '0%': { opacity: '0', transform: 'scale(0.3)' },
+          '50%': { transform: 'scale(1.1)' },
+          '100%': { opacity: '1', transform: 'scale(1)' },
+        },
+        fadeIn: {
+          '0%': { opacity: '0', transform: 'translateY(-10px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
+      },
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],
         mono: ['Fira Code', 'monospace'],

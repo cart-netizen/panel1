@@ -334,26 +334,59 @@ def require_pro(current_user=Depends(get_current_user), db: Session = Depends(ge
   return current_user
 
 
-def get_user_subscription_level(current_user=Depends(get_current_user), db: Session = Depends(get_db)) -> str:
-  """
-  Возвращает текущий уровень подписки пользователя
-  """
-  # Загружаем preferences
-  user_prefs = db.query(UserPreferences).filter_by(user_id=current_user.id).first()
-
-  if not user_prefs:
-    return "basic"
-
-  # Получаем план из preferences
-  import json
+def get_user_subscription_level(user) -> int:
+  """Определяет уровень подписки пользователя"""
   try:
-    if user_prefs.preferred_strategies:
-      strategies = json.loads(user_prefs.preferred_strategies)
-      return strategies.get('subscription_plan', 'basic') if isinstance(strategies, dict) else 'basic'
-  except:
-    pass
+    print(f"🔍 Проверяем подписку для user_id={user.id}")
 
-  return "basic"
+    # 1. Проверяем основную подписку
+    if hasattr(user, 'subscription_status') and user.subscription_status == 'active':
+      if hasattr(user, 'subscription_plan') and user.subscription_plan:
+        plan = user.subscription_plan.lower()
+        print(f"📊 Найден план: {plan}")
+
+        if plan == 'premium':
+          return 2
+        elif plan == 'pro':
+          return 3
+        elif plan == 'basic':
+          return 1
+
+      # ДОБАВИТЬ FALLBACK для активных пользователей без плана:
+      else:
+        print("⚠️ Активный пользователь без плана - присваиваем premium")
+        return 2  # Даем премиум для активных пользователей
+
+    # 2. Проверяем UserPreferences
+    if hasattr(user, 'preferences'):
+      prefs = user.preferences
+      print(f"🔄 Проверяем UserPreferences: {type(prefs)}")
+
+      # Исправляем обработку preferences
+      if isinstance(prefs, dict):
+        plan = prefs.get('subscription_plan', 'basic').lower()
+      elif hasattr(prefs, 'subscription_plan'):
+        plan = prefs.subscription_plan.lower()
+      elif prefs and hasattr(prefs, '__dict__'):
+        plan = getattr(prefs, 'subscription_plan', 'basic').lower()
+      else:
+        print(f"⚠️ UserPreferences тип: {type(prefs)}, содержимое: {prefs}")
+        plan = 'basic'
+
+      print(f"📋 План из preferences: {plan}")
+
+      if plan == 'premium':
+        return 2
+      elif plan == 'pro':
+        return 3
+
+    # 3. По умолчанию - basic
+    print("📋 Используем план basic по умолчанию")
+    return 1
+
+  except Exception as e:
+    print(f"❌ Ошибка определения уровня подписки: {e}")
+    return 1
 
 SUBSCRIPTION_LIMITS = {
   SubscriptionLevel.FREE: {

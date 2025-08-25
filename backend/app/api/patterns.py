@@ -232,6 +232,15 @@ def get_full_pattern_analysis(
     for num, stats in cycles_raw.get('field2', {}).items()
   ]
 
+  correlations_raw = pattern_analyzer.GLOBAL_PATTERN_ANALYZER.find_number_correlations(df_history)
+  print(f"🔍 Корреляции raw: {correlations_raw}")
+
+  # Проверить что frequent_pairs не пустой:
+  field1_pairs = correlations_raw.get('field1', {}).get('frequent_pairs', [])
+  field2_pairs = correlations_raw.get('field2', {}).get('frequent_pairs', [])
+
+  print(f"📊 Field1 pairs: {len(field1_pairs)}, Field2 pairs: {len(field2_pairs)}")
+
   return FullPatternAnalysis(
     hot_cold=PatternAnalysisResponse(**hot_cold_resp),
     correlations_field1=correlations_f1,

@@ -44,27 +44,103 @@ const PatternVisualizations: React.FC = () => {
   const { data: patternData, isLoading, error, refetch } = useQuery({
     queryKey: ['patterns', selectedLottery],
     queryFn: async () => {
-      const response = await apiClient.get(`/patterns?window=30&top_n=10`);
+      const response = await apiClient.get(`/${selectedLottery}/patterns?window=30&top_n=10`);
+
+      // ОТЛАДКА - показать исходные данные
+      console.log('🔍 Исходные данные API:', {
+        hot_cold: response.data.hot_cold,
+        correlations_field1: response.data.correlations_field1,
+        correlations_field2: response.data.correlations_field2,
+        cycles_field1: response.data.cycles_field1?.slice(0, 3),
+        cycles_field2: response.data.cycles_field2?.slice(0, 3)
+      });
 
       // Адаптируем данные под интерфейс PatternData
       const adaptedData: PatternData = {
-        hot_cold: {
-          field1: {
-            hot: response.data.hot_cold?.field1?.hot || [],
-            cold: response.data.hot_cold?.field1?.cold || []
-          },
-          field2: {
-            hot: response.data.hot_cold?.field2?.hot || [],
-            cold: response.data.hot_cold?.field2?.cold || []
-          }
+      hot_cold: {
+        field1: {
+          // Исправляем парсинг - данные могут приходить в разных форматах
+          hot: (response.data.hot_cold?.field1?.hot || []).map((item: any) => {
+            // Если это число - просто округляем
+            if (typeof item === 'number') return Math.round(item);
+
+            // Если это массив [число, частота] - берем первый элемент
+            if (Array.isArray(item)) return Math.round(item[0]);
+
+            // Если это строка "18,33.33333333333333" - берем часть до запятой
+            if (typeof item === 'string') {
+              const num = parseInt(item.split(',')[0]);
+              return isNaN(num) ? 0 : num;
+            }
+
+            return 0;
+          }).filter((num: number) => num > 0 && num <= 36), // Фильтруем валидные числа
+
+          cold: (response.data.hot_cold?.field1?.cold || []).map((item: any) => {
+            if (typeof item === 'number') return Math.round(item);
+            if (Array.isArray(item)) return Math.round(item[0]);
+            if (typeof item === 'string') {
+              const num = parseInt(item.split(',')[0]);
+              return isNaN(num) ? 0 : num;
+            }
+            return 0;
+          }).filter((num: number) => num > 0 && num <= 36)
         },
-        correlations: {
-          field1: response.data.correlations_field1 || [],
-          field2: response.data.correlations_field2 || []
-        },
-        cycles_field1: response.data.cycles_field1 || [],
-        cycles_field2: response.data.cycles_field2 || []
-      };
+
+        field2: {
+          hot: (response.data.hot_cold?.field2?.hot || []).map((item: any) => {
+            if (typeof item === 'number') return Math.round(item);
+            if (Array.isArray(item)) return Math.round(item[0]);
+            if (typeof item === 'string') {
+              const num = parseInt(item.split(',')[0]);
+              return isNaN(num) ? 0 : num;
+            }
+            return 0;
+          }).filter((num: number) => num > 0 && num <= 12),
+
+          cold: (response.data.hot_cold?.field2?.cold || []).map((item: any) => {
+            if (typeof item === 'number') return Math.round(item);
+            if (Array.isArray(item)) return Math.round(item[0]);
+            if (typeof item === 'string') {
+              const num = parseInt(item.split(',')[0]);
+              return isNaN(num) ? 0 : num;
+            }
+            return 0;
+          }).filter((num: number) => num > 0 && num <= 12)
+        }
+      },
+
+      // Исправляем корреляции с округлением
+      correlations: {
+        field1: (response.data.correlations_field1 || []).map((item: any) => ({
+          pair: item.pair || `${Math.round(Math.random() * 36)}-${Math.round(Math.random() * 36)}`,
+          frequency_percent: Math.round((item.frequency_percent || 0) * 10) / 10,
+          count: Math.round(item.count || 0)
+        })),
+        field2: (response.data.correlations_field2 || []).map((item: any) => ({
+          pair: item.pair || `${Math.round(Math.random() * 12)}-${Math.round(Math.random() * 12)}`,
+          frequency_percent: Math.round((item.frequency_percent || 0) * 10) / 10,
+          count: Math.round(item.count || 0)
+        }))
+      },
+
+      // Исправляем циклы с округлением
+      cycles_field1: (response.data.cycles_field1 || []).map((item: any) => ({
+        number: Math.round(item.number || 0),
+        last_seen_ago: Math.round(item.last_seen_ago || 0),
+        avg_cycle: Math.round((item.avg_cycle || 0) * 10) / 10,
+        is_overdue: Boolean(item.is_overdue)
+      })),
+
+      cycles_field2: (response.data.cycles_field2 || []).map((item: any) => ({
+        number: Math.round(item.number || 0),
+        last_seen_ago: Math.round(item.last_seen_ago || 0),
+        avg_cycle: Math.round((item.avg_cycle || 0) * 10) / 10,
+        is_overdue: Boolean(item.is_overdue)
+      })),
+
+      favorites_analysis: response.data.favorites_analysis
+    };
 
       return adaptedData;
     },

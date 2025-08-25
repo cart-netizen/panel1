@@ -177,15 +177,15 @@ const ReadinessAnalysis: React.FC<ReadinessAnalysisProps> = ({ data }) => {
             </div>
             <div className="flex justify-between">
               <span>Частота:</span>
-              <span className="font-semibold">{data.frequency.toFixed(0)}</span>
+              <span className="font-semibold">{Math.round(data.frequency)}</span>
             </div>
             <div className="flex justify-between">
               <span>Интервал:</span>
-              <span>{data.currentInterval.toFixed(1)} тиражей</span>
+              <span>{Math.round(data.currentInterval * 10) / 10} тиражей</span>
             </div>
             <div className="flex justify-between">
               <span>Средний цикл:</span>
-              <span>{data.avgInterval.toFixed(1)}</span>
+              <span>{Math.round(data.avgInterval * 10) / 10}</span>
             </div>
             {data.isOverdue && <div className="text-red-300 font-semibold">⏰ Просрочено!</div>}
             {data.isHot && <div className="text-orange-300">🔥 Горячее</div>}

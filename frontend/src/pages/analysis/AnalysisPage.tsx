@@ -577,10 +577,10 @@ const clustersMutation = useMutation({
               <div className="mt-8">
                 <div className="mb-6">
                   <h3 className="text-xl font-bold text-gray-900 mb-2">
-                    📊 Интерактивные графики паттернов
+
                   </h3>
                   <p className="text-gray-600">
-                    Визуальное представление найденных закономерностей
+
                   </p>
                 </div>
 

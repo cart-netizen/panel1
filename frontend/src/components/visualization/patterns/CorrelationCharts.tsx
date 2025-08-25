@@ -55,7 +55,7 @@ const CorrelationCharts: React.FC<CorrelationChartsProps> = ({ data }) => {
   };
 
   // Кастомный tooltip
-  const CustomTooltip = ({ active, payload, label }: any) => {
+    const CustomTooltip = ({ active, payload, label }: any) => {
     if (active && payload && payload.length) {
       const data = payload[0].payload;
       return (
@@ -69,6 +69,7 @@ const CorrelationCharts: React.FC<CorrelationChartsProps> = ({ data }) => {
             </div>
           </div>
         </div>
+
       );
     }
     return null;

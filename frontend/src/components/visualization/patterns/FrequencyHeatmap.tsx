@@ -58,7 +58,7 @@ const FrequencyHeatmap: React.FC<FrequencyHeatmapProps> = ({ data }) => {
 
     // Поле 1 (числа от 1 до field1_max)
     const field1Data = Array.from({length: config.field1_max}, (_, i) => {
-      const num = i + 1;
+      const num: number = i + 1;
       const isHot = data.hot_cold.field1.hot.includes(num);
       const isCold = data.hot_cold.field1.cold.includes(num);
       const cycleInfo = data.cycles_field1?.find(c => c.number === num);
@@ -90,7 +90,7 @@ const FrequencyHeatmap: React.FC<FrequencyHeatmapProps> = ({ data }) => {
 
     // Поле 2 (числа от 1 до field2_max)
     const field2Data = Array.from({length: config.field2_max}, (_, i) => {
-      const num = i + 1;
+      const num: number = i + 1;
       const isHot = data.hot_cold.field2.hot.includes(num);
       const isCold = data.hot_cold.field2.cold.includes(num);
       const cycleInfo = data.cycles_field2?.find(c => c.number === num);
@@ -157,18 +157,20 @@ const FrequencyHeatmap: React.FC<FrequencyHeatmapProps> = ({ data }) => {
 
   return (
     <div className="p-6 space-y-8">
-      <div style={{display: 'none'}}>
+      {/* CSS стили - перенесены в отдельный блок */}
+      <div style={{ display: 'none' }}>
         <style dangerouslySetInnerHTML={{
           __html: `
-      @keyframes fadeInScale {
-        from { opacity: 0; transform: scale(0.8); }
-        to { opacity: 1; transform: scale(1); }
-      }
-      .animate-fade-in-scale {
-        animation: fadeInScale 0.8s ease-out both;
-      }
-    `
-        }}/>
+            @keyframes fadeInScale {
+              from { opacity: 0; transform: scale(0.8); }
+              to { opacity: 1; transform: scale(1); }
+            }
+            
+            .animate-fade-in-scale {
+              animation: fadeInScale 0.8s ease-out both;
+            }
+          `
+        }} />
       </div>
 
       {/* Заголовок */}
@@ -188,12 +190,15 @@ const FrequencyHeatmap: React.FC<FrequencyHeatmapProps> = ({ data }) => {
           Поле 1 (числа 1-{config.field1_max})
         </h4>
 
-        {/* Сетка чисел */}
-        <div className={`grid gap-2 mb-4`} style={{ gridTemplateColumns: `repeat(${Math.min(10, config.field1_max)}, minmax(0, 1fr))` }}>
+        {/* Сетка чисел - уменьшенные квадраты */}
+        <div className="grid gap-2 mb-5" style={{
+          gridTemplateColumns: `repeat(${Math.min(18, config.field1_max)}, minmax(0, 1fr))`,
+          maxWidth: '1000px'  // Ограничиваем ширину
+        }}>
           {heatmapData.field1.map((item, index) => (
             <div
               key={item.number}
-              className="relative group aspect-square flex items-center justify-center text-white font-bold text-sm rounded cursor-pointer transition-all duration-300 hover:scale-110 hover:z-10 hover:shadow-lg animate-fade-in-scale"
+              className="relative group w-10 h-10 flex items-center justify-center text-white font-bold text-lg rounded-xl cursor-pointer transition-all duration-300 hover:scale-110 hover:z-10 hover:shadow-lg animate-fade-in-scale"
               style={{
                 backgroundColor: getHeatmapColor(item, field1Max, field1Min),
                 animationDelay: `${index * 0.02}s`
@@ -237,7 +242,7 @@ const FrequencyHeatmap: React.FC<FrequencyHeatmapProps> = ({ data }) => {
           {heatmapData.field2.map((item, index) => (
             <div
               key={item.number}
-              className="relative group w-16 h-16 flex items-center justify-center text-white font-bold text-lg rounded-xl cursor-pointer transition-all duration-300 hover:scale-110 hover:z-10 hover:shadow-lg animate-fade-in-scale"
+              className="relative group w-10 h-10 flex items-center justify-center text-white font-bold text-lg rounded-xl cursor-pointer transition-all duration-300 hover:scale-110 hover:z-10 hover:shadow-lg animate-fade-in-scale"
               style={{
                 backgroundColor: getHeatmapColor(item, field2Max, field2Min),
                 animationDelay: `${(heatmapData.field1.length + index) * 0.02}s`

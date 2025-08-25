@@ -79,12 +79,19 @@ const TrendAnalysisCharts: React.FC<TrendAnalysisChartsProps> = ({ data }) => {
 
   // Получаем горячие числа для легенды
   const hotNumbers = selectedField === 'field1'
-    ? (data?.hot_cold.field1.hot.slice(0, 5) || [7, 12, 19, 3, 15])
-    : (data?.hot_cold.field2.hot.slice(0, 3) || [2, 4, 1]);
+  ? (data?.hot_cold.field1.hot.slice(0, 5) || [7, 12, 19, 3, 15])
+    .map(num => Math.round(num))
+    .filter(num => num > 0 && num <= 36)
+  : (data?.hot_cold.field2.hot.slice(0, 3) || [2, 4, 1])
+    .map(num => Math.round(num))
+    .filter(num => num > 0 && num <= 20);
+  // const hotNumbers = selectedField === 'field1'
+  //   ? (data?.hot_cold.field1.hot.slice(0, 5) || [7, 12, 19, 3, 15])
+  //   : (data?.hot_cold.field2.hot.slice(0, 3) || [2, 4, 1]);
 
   // Цвета для линий
-  const getLineColor = (index: number) => {
-    const colors = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#06b6d4', '#8b5cf6'];
+  const getLineColor = (index: number): string => {
+    const colors: string[] = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#06b6d4', '#8b5cf6'];
     return colors[index % colors.length];
   };
 
